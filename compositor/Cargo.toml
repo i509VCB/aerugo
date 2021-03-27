@@ -1,0 +1,38 @@
+[package]
+name = "wayland_compositor"
+version = "0.1.0"
+authors = [ "i509VCB <git@i509.me>" ]
+license = "Apache-2.0"
+publish = false
+edition = "2018"
+
+[dependencies]
+clap = "3.0.0-beta.2"
+slog = "2.1.1"
+slog-term = "2.8"
+slog-async = "2.2"
+slog-stdlog = "4.1.0"
+slog-scope = "4.4.0"
+
+[dependencies.smithay]
+git = "https://github.com/Smithay/smithay"
+default-features = false
+features = [
+    "slog-stdlog",
+    "use_system_lib",
+    "wayland_frontend",
+    "backend_winit"
+]
+
+[dependencies.x11rb]
+optional = true
+version = "0.8"
+default-features = false
+features = [
+    "composite"
+]
+
+[features]
+default = [ "winit" ]
+winit = [ "smithay/backend_winit" ]
+xwayland = [ "smithay/xwayland", "x11rb" ]

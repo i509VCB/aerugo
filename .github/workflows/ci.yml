@@ -1,0 +1,71 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    name: cargo fmt
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          components: rustfmt
+          override: true
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+#  check:
+#    runs-on: ubuntu-latest
+#    strategy:
+#      matrix:
+#        # Architectures to check with
+#        arch: [
+#            x86_64,
+#            i686,
+#            aarch64
+#        ]
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Install stable toolchain
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          toolchain: stable
+#          profile: minimal
+#          override: true
+#          target: ${{ matrix.arch }}-unknown-linux-gnu
+#
+#      - name: System dependencies
+#        run: sudo apt-get update; sudo apt-get install libudev-dev libdbus-1-dev
+#
+#      - name: Run cargo build
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: check
+#          args: --target ${{ matrix.arch }}-unknown-linux-gnu
+#
+#  clippy:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Install stable toolchain
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          toolchain: stable
+#          profile: minimal
+#          override: true
+#          components: clippy
+#
+#      - name: System dependencies
+#        run: sudo apt-get update; sudo apt-get install libudev-dev libdbus-1-dev
+#
+#      - name: Run clippy
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: clippy
+#          args: -- -D warnings
