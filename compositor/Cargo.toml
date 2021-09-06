@@ -33,6 +33,6 @@ features = [
 ]
 
 [features]
-default = [ "winit" ]
+default = [ "winit" ] # I would add xwayland here, since I use the JVM a lot. However until other stuff is in place, there is little to enabling xwayland.
 winit = [ "smithay/backend_winit" ]
 xwayland = [ "smithay/xwayland", "x11rb" ]
