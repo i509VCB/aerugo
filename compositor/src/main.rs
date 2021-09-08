@@ -1,7 +1,7 @@
 use std::error::Error;
 
-use wayland_compositor::{backend::winit::WinitBackend, run, state::Socket};
 use slog::{o, Drain, Logger};
+use wayland_compositor::{backend::winit::WinitBackend, run, state::Socket};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Initialize the logger:

@@ -1,3 +1,4 @@
+use directories::ProjectDirs;
 use slog::{info, Logger};
 use smithay::{
     reexports::{
@@ -8,7 +9,7 @@ use smithay::{
 };
 use std::{cell::RefCell, error::Error, rc::Rc, time::Duration};
 
-use crate::{backend::Backend, shell::Shell};
+use crate::{backend::Backend, config::watcher::DirWatcher, shell::Shell};
 
 #[derive(Debug)]
 pub enum Socket {
@@ -46,6 +47,8 @@ impl State {
             let display = &mut *display.borrow_mut();
 
             insert_wayland_source(loop_handle.clone(), display)?;
+
+            setup_dir_watcher(loop_handle.clone(), logger.clone())?;
 
             backend.setup_backend(loop_handle)?;
 
@@ -150,6 +153,25 @@ fn insert_wayland_source(
             }
         },
     )?;
+
+    Ok(())
+}
+
+fn setup_dir_watcher(
+    handle: LoopHandle<'static, State>,
+    logger: Logger,
+) -> Result<(), Box<dyn Error>> {
+    let project_dirs = ProjectDirs::from("", "i5", "wayland_compositor").unwrap();
+
+    let config_dir = project_dirs.config_dir();
+
+    let watcher = DirWatcher::new(config_dir, logger)?;
+
+    handle.insert_source(watcher, |_event, _path, _state| {
+        todo!("Handle events from dir watcher")
+        //
+        //
+    })?;
 
     Ok(())
 }
