@@ -23,7 +23,6 @@ pub struct DirWatcher {
 impl DirWatcher {
     pub fn new(watching: &(impl AsRef<Path> + ?Sized), logger: Logger) -> io::Result<DirWatcher> {
         let path = watching.as_ref().to_owned();
-
         let inner = WatcherInner::new(path, logger)?;
 
         Ok(DirWatcher { inner })

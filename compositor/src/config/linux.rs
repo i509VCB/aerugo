@@ -51,7 +51,7 @@ impl WatcherInner {
             "path" => path.clone()
         ));
 
-        info!(logger, "Initialized watcher for {path}", path = path);
+        info!(logger, "Initialized watcher");
 
         Ok(WatcherInner {
             inotify,
@@ -65,7 +65,7 @@ impl WatcherInner {
     where
         F: FnMut(watcher::Event),
     {
-        let mut buffer = [0; 1024];
+        let mut buffer = [0; 256];
 
         for event in self.inotify.read_events(&mut buffer)? {
             if event.wd == self.watch {
@@ -76,7 +76,7 @@ impl WatcherInner {
                     debug!(
                         self.logger,
                         "Created file {file}",
-                        file = &path.to_string_lossy().into_owned()
+                        file = &path.file_name().unwrap().to_string_lossy().into_owned()
                     );
                     f(watcher::Event::Created(path))
                 } else if event.mask.contains(EventMask::DELETE) {
@@ -86,7 +86,7 @@ impl WatcherInner {
                     debug!(
                         self.logger,
                         "Removed file {file}",
-                        file = &path.to_string_lossy().into_owned()
+                        file = &path.file_name().unwrap().to_string_lossy().into_owned()
                     );
                     f(watcher::Event::Removed(path))
                 } else if event.mask.contains(EventMask::MODIFY) {
@@ -96,7 +96,7 @@ impl WatcherInner {
                     debug!(
                         self.logger,
                         "file {file} modified",
-                        file = &path.to_string_lossy().into_owned()
+                        file = &path.file_name().unwrap().to_string_lossy().into_owned()
                     );
                     f(watcher::Event::Modified(path))
                 }

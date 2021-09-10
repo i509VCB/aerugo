@@ -8,23 +8,33 @@ mod layer;
 mod popup;
 mod toplevel;
 
-use std::error::Error;
+use std::{
+    error::Error,
+    sync::{Arc, Mutex},
+};
 
 use slog::Logger;
 use smithay::{
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Display},
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, DispatchData, Display},
     utils::{Logical, Point, Rectangle, Size},
     wayland::{
         compositor::{self, is_sync_subsurface, with_surface_tree_upward, TraversalAction},
         shell::{
-            wlr_layer::{self, LayerSurface},
-            xdg::{PopupSurface, SurfaceCachedState, ToplevelSurface},
+            wlr_layer::{self, wlr_layer_shell_init, LayerShellState, LayerSurface},
+            xdg::{
+                xdg_shell_init, PopupSurface, ShellState, SurfaceCachedState, ToplevelSurface,
+                XdgRequest,
+            },
         },
     },
 };
 
 use crate::{
-    shell::{popup::handle_popup_commit, toplevel::handle_toplevel_commit},
+    shell::{
+        layer::{handle_layer_commit, handle_layer_shell_request},
+        popup::handle_popup_commit,
+        toplevel::handle_toplevel_commit,
+    },
     state::State,
 };
 
@@ -39,12 +49,24 @@ use self::toplevel::ToplevelInner;
 pub struct Shell {
     toplevels: Vec<Toplevel>,
     popups: Vec<Popup>,
-    // TODO: Layers
+    xdg_shell_state: Arc<Mutex<ShellState>>,
+    layers: Vec<Layer>,
+    layer_shell_state: Arc<Mutex<LayerShellState>>,
 }
 
 impl Shell {
-    pub fn new(_display: &mut Display, _logger: Logger) -> Result<Shell, Box<dyn Error>> {
-        todo!("Implement the shell")
+    pub fn new(display: &mut Display, logger: Logger) -> Result<Shell, Box<dyn Error>> {
+        let (xdg_shell_state, _, _) = xdg_shell_init(display, handle_xdg_request, logger.clone());
+        let (layer_shell_state, _) =
+            wlr_layer_shell_init(display, handle_layer_shell_request, logger);
+
+        Ok(Shell {
+            toplevels: vec![],
+            popups: vec![],
+            xdg_shell_state,
+            layers: vec![],
+            layer_shell_state,
+        })
     }
 
     /// Inserts a new XDG shell window into the shell.
@@ -84,10 +106,19 @@ impl Shell {
 
     // TODO: Layer methods
 
+    pub fn layers(&self) -> impl Iterator<Item = &Layer> {
+        self.layers.iter()
+    }
+
+    pub fn layers_mut(&mut self) -> impl Iterator<Item = &mut Layer> {
+        self.layers.iter_mut()
+    }
+
+    /// Refreshes the shell and cleans up any dead toplevels, popups or layers.
     pub fn refresh(&mut self) {
         self.toplevels.retain(|w| w.inner.alive());
         self.popups.retain(|p| p.inner.alive());
-        // TODO: Layers
+        self.layers.retain(|p| p.inner.alive());
     }
 
     /// Sends frame callbacks to the all surfaces.
@@ -180,6 +211,24 @@ pub struct Layer {
     layer: wlr_layer::Layer,
 }
 
+impl Layer {
+    pub fn alive(&self) -> bool {
+        self.inner.alive()
+    }
+
+    pub fn get_surface(&self) -> Option<&WlSurface> {
+        self.inner.get_surface()
+    }
+
+    pub fn send_configure(&self) {
+        self.inner.send_configure()
+    }
+
+    pub fn layer(&self) -> wlr_layer::Layer {
+        self.layer
+    }
+}
+
 impl State {
     pub fn handle_surface_commit(&mut self, surface: &WlSurface) {
         #[cfg(feature = "xwayland")]
@@ -212,6 +261,15 @@ impl State {
             handle_popup_commit(surface, popup);
         }
 
-        // TODO: Layers
+        if let Some(layer) = shell
+            .layers_mut()
+            .find(|layer| layer.get_surface() == Some(surface))
+        {
+            handle_layer_commit(surface, layer);
+        }
     }
+}
+
+fn handle_xdg_request(_request: XdgRequest, mut _ddata: DispatchData) {
+    todo!()
 }
