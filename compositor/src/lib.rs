@@ -19,6 +19,7 @@ use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
 use crate::state::{Socket, State};
 
+/// The main entrypoint of the compositor.
 pub fn run(
     logger: Logger,
     backend: impl Backend + 'static,

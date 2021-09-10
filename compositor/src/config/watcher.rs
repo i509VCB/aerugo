@@ -10,7 +10,7 @@ use smithay::reexports::calloop::{
 };
 
 #[cfg(target_os = "linux")]
-pub use crate::config::linux::*;
+use crate::config::linux::*;
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("No config watcher implementation outside of linux at the moment.");
