@@ -9,21 +9,26 @@ mod popup;
 mod toplevel;
 
 use std::{
+    cell::RefCell,
     error::Error,
+    fmt::Debug,
     sync::{Arc, Mutex},
 };
 
-use slog::Logger;
+use slog::{warn, Logger};
 use smithay::{
     reexports::wayland_server::{protocol::wl_surface::WlSurface, DispatchData, Display},
-    utils::{Logical, Point, Rectangle, Size},
+    utils::{Logical, Point, Rectangle},
     wayland::{
-        compositor::{self, is_sync_subsurface, with_surface_tree_upward, TraversalAction},
+        compositor::{
+            self, is_sync_subsurface, with_surface_tree_downward, with_surface_tree_upward,
+            SubsurfaceCachedState, SurfaceAttributes, TraversalAction,
+        },
         shell::{
             wlr_layer::{self, wlr_layer_shell_init, LayerShellState, LayerSurface},
             xdg::{
-                xdg_shell_init, PopupSurface, ShellState, SurfaceCachedState, ToplevelSurface,
-                XdgRequest,
+                xdg_shell_init, Configure, PopupConfigureError, PopupSurface, ShellState,
+                SurfaceCachedState, ToplevelSurface, XdgRequest,
             },
         },
     },
@@ -36,6 +41,7 @@ use crate::{
         toplevel::handle_toplevel_commit,
     },
     state::State,
+    surface_data::SurfaceData,
 };
 
 use self::toplevel::ToplevelInner;
@@ -77,7 +83,7 @@ impl Shell {
     ) -> &mut Toplevel {
         let mut window = Toplevel {
             inner: ToplevelInner::Xdg(toplevel),
-            size: Size::default(),
+            bbox: Default::default(),
             position,
         };
 
@@ -95,6 +101,13 @@ impl Shell {
     }
 
     // TODO: Popup methods
+
+    pub fn new_xdg_popup(&mut self, popup: PopupSurface) -> &mut Popup {
+        let popup = Popup { inner: popup };
+
+        self.popups.push(popup);
+        self.popups.last_mut().unwrap()
+    }
 
     pub fn popups(&self) -> impl Iterator<Item = &Popup> {
         self.popups.iter()
@@ -131,8 +144,8 @@ impl Shell {
 #[derive(Debug)]
 pub struct Toplevel {
     inner: ToplevelInner,
-    size: Size<i32, Logical>,
     position: Point<i32, Logical>,
+    bbox: Rectangle<i32, Logical>,
 }
 
 impl Toplevel {
@@ -153,10 +166,6 @@ impl Toplevel {
         self.update();
     }
 
-    pub fn size(&self) -> Size<i32, Logical> {
-        self.size
-    }
-
     pub fn geometry(&self) -> Rectangle<i32, Logical> {
         // Generally the shell will be given the geometry by the client.
         compositor::with_states(self.inner.get_surface().unwrap(), |states| {
@@ -167,7 +176,7 @@ impl Toplevel {
     }
 
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(self.position, self.size)
+        self.bbox
     }
 
     pub fn send_configure(&self) {
@@ -175,7 +184,53 @@ impl Toplevel {
     }
 
     fn update(&mut self) {
-        todo!()
+        if !self.inner.alive() {
+            return;
+        }
+
+        let bbox = self.bbox();
+
+        let bbox = self
+            .get_surface()
+            .map(|surface| {
+                let mut new_bbox = bbox;
+
+                with_surface_tree_downward(
+                    surface,
+                    self.position,
+                    |_, states, &position| match states
+                        .data_map
+                        .get::<RefCell<SurfaceData>>()
+                        .and_then(|data| data.borrow().size())
+                    {
+                        Some(size) => {
+                            let bbox = self.bbox();
+                            let mut position = position;
+
+                            if states.role == Some("subsurface") {
+                                let current =
+                                    states.cached_state.current::<SubsurfaceCachedState>();
+                                position += current.location;
+                            }
+
+                            // Update the bounding box.
+                            new_bbox = bbox.merge(Rectangle::from_loc_and_size(position, size));
+
+                            TraversalAction::DoChildren(position)
+                        }
+
+                        // Parent surface is unmapped, no need to calculate bbox for hidden children.
+                        None => TraversalAction::SkipChildren,
+                    },
+                    |_, _, _| {},
+                    |_, _, _| true,
+                );
+
+                new_bbox
+            })
+            .unwrap_or_else(|| Rectangle::from_loc_and_size(self.position, (0, 0)));
+
+        self.bbox = bbox;
     }
 }
 
@@ -193,11 +248,8 @@ impl Popup {
         self.inner.get_surface()
     }
 
-    pub fn send_configure(&self) {
-        // This should never fail as the initial configure is always allowed.
-        self.inner
-            .send_configure()
-            .expect("Popup initial configure should not fail");
+    pub fn send_configure(&self) -> Result<(), PopupConfigureError> {
+        self.inner.send_configure()
     }
 
     // TODO: Parent
@@ -237,12 +289,24 @@ impl State {
         let shell = self.shell_mut();
 
         if !is_sync_subsurface(surface) {
-            // Update buffer of all child surfaces
+            // Update the buffer of all child surfaces
             with_surface_tree_upward(
                 surface,
                 (),
                 |_, _, _| TraversalAction::DoChildren(()),
-                |_, _states, _| todo!("Handle updating buffers of child surfaces"),
+                |_, states, _| {
+                    states
+                        .data_map
+                        .insert_if_missing(|| RefCell::new(SurfaceData::default()));
+
+                    let mut data = states
+                        .data_map
+                        .get::<RefCell<SurfaceData>>()
+                        .unwrap()
+                        .borrow_mut();
+
+                    data.update_buffer(&mut *states.cached_state.current::<SurfaceAttributes>())
+                },
                 |_, _, _| true,
             );
         }
@@ -270,6 +334,102 @@ impl State {
     }
 }
 
-fn handle_xdg_request(_request: XdgRequest, mut _ddata: DispatchData) {
-    todo!()
+fn handle_xdg_request(request: XdgRequest, mut ddata: DispatchData) {
+    let state = ddata.get::<State>().unwrap();
+
+    match request {
+        // Toplevel requests
+        XdgRequest::NewToplevel { surface } => {
+            // TODO: More advanced positioning logic, for now just place windows at (0, 0).
+
+            // Do not send a configure here, the initial configure
+            // of a xdg_surface has to be sent during the commit if
+            // the surface is not already configured
+            state.shell_mut().new_xdg_toplevel(surface, (0, 0).into());
+        }
+
+        XdgRequest::Move {
+            surface: _,
+            seat: _,
+            serial: _,
+        } => {
+            todo!()
+        }
+
+        XdgRequest::Resize {
+            surface: _,
+            seat: _,
+            serial: _,
+            edges: _,
+        } => todo!(),
+
+        XdgRequest::AckConfigure {
+            surface: _,
+            configure: Configure::Toplevel(_),
+        } => todo!(),
+
+        XdgRequest::Fullscreen {
+            surface: _,
+            output: _,
+        } => todo!(),
+
+        XdgRequest::UnFullscreen { surface: _ } => todo!(),
+
+        XdgRequest::Maximize { surface: _ } => todo!(),
+
+        XdgRequest::UnMaximize { surface: _ } => todo!(),
+
+        // Popup requests
+        XdgRequest::NewPopup {
+            surface,
+            positioner,
+        } => {
+            // Do not send a configure here, the initial configure
+            // of a xdg_surface has to be sent during the commit if
+            // the surface is not already configured
+
+            // TODO: properly recompute the geometry with the whole of positioner state
+            surface
+                .with_pending_state(|state| {
+                    // NOTE: This is not really necessary as the default geometry
+                    // is already set the same way, but for demonstrating how
+                    // to set the initial popup geometry this code is left as
+                    // an example
+                    state.geometry = positioner.get_geometry();
+                })
+                .unwrap();
+
+            state.shell_mut().new_xdg_popup(surface);
+        }
+
+        XdgRequest::RePosition {
+            surface,
+            positioner,
+            token,
+        } => {
+            let result = surface.with_pending_state(|state| {
+                // NOTE: This is again a simplification, a proper compositor would
+                // calculate the geometry of the popup here. For simplicity we just
+                // use the default implementation here that does not take the
+                // window position and output constraints into account.
+                let geometry = positioner.get_geometry();
+                state.geometry = geometry;
+                state.positioner = positioner;
+            });
+
+            if result.is_ok() {
+                surface.send_repositioned(token);
+            }
+        }
+
+        // Do nothing
+        XdgRequest::AckConfigure {
+            surface: _,
+            configure: Configure::Popup(_),
+        } => (),
+
+        unhandled => {
+            warn!(state.logger, "Unhandled XDG Shell request encountered"; "request" => ?unhandled);
+        }
+    }
 }

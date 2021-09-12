@@ -1,7 +1,7 @@
-use std::error::Error;
+use std::{error::Error, process};
 
 use clap::{ArgGroup, Clap};
-use slog::{o, Drain, Logger};
+use slog::{error, o, Drain, Logger};
 use wayland_compositor::{
     backend::{winit::WinitBackend, Backend},
     run,
@@ -49,7 +49,8 @@ impl BackendSelection {
         if self.winit {
             WinitBackend::new(logger)
         } else if self.udev {
-            todo!()
+            error!(logger, "Udev backend not currently supported.");
+            process::exit(1);
         } else {
             // No explicit backend specified, determine which one should be used.
             // TODO: Fallback detection

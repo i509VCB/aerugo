@@ -21,6 +21,7 @@ pub fn handle_popup_commit(surface: &WlSurface, popup: &mut Popup) {
     .unwrap();
 
     if !initial_configure_sent {
-        popup.send_configure();
+        // The initial configure should never fail.
+        popup.send_configure().unwrap();
     }
 }

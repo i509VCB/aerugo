@@ -7,6 +7,7 @@ pub mod backend;
 mod config;
 pub mod shell;
 pub mod state;
+pub mod surface_data;
 
 #[cfg(feature = "xwayland")]
 mod xwayland;
