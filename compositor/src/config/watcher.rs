@@ -88,3 +88,41 @@ pub enum Event {
     /// The file has been removed.
     Removed(PathBuf),
 }
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use directories::ProjectDirs;
+    use slog::{Drain, Logger};
+    use smithay::reexports::calloop::EventLoop;
+
+    use super::DirWatcher;
+
+    #[test]
+    fn test_watcher() {
+        // Initialize logger
+        let logger = Logger::root(
+            slog_async::Async::default(slog_term::term_full().fuse()).fuse(),
+            slog::o!(),
+        );
+
+        let _guard = slog_scope::set_global_logger(logger.clone());
+        slog_stdlog::init().expect("Could not setup log backend");
+
+        let mut event_loop = EventLoop::<()>::try_new().unwrap();
+        let project_dirs = ProjectDirs::from("", "i5", "wayland_compositor").unwrap();
+        let config_dir = project_dirs.config_dir();
+
+        let watcher = DirWatcher::new(config_dir, logger).expect("Watcher not created");
+
+        event_loop
+            .handle()
+            .insert_source(watcher, |_event, _, _| {})
+            .unwrap();
+
+        event_loop
+            .run(Duration::from_millis(10), &mut (), |_| {})
+            .expect("Failed to run event loop")
+    }
+}

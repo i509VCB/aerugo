@@ -43,7 +43,7 @@ impl WatcherInner {
         let path = &watching.to_string_lossy().into_owned();
         let watch = inotify.add_watch(
             &watching,
-            WatchMask::CREATE | WatchMask::DELETE | WatchMask::MODIFY,
+            WatchMask::CREATE | WatchMask::DELETE | WatchMask::MODIFY | WatchMask::MOVED_FROM | WatchMask::MOVED_TO,
         )?;
 
         let logger = logger.new(slog::o!(
@@ -65,28 +65,32 @@ impl WatcherInner {
     where
         F: FnMut(watcher::Event),
     {
-        let mut buffer = [0; 256];
+        let mut buffer = [0; 1024];
 
         for event in self.inotify.read_events(&mut buffer)? {
             if event.wd == self.watch {
-                if event.mask.contains(EventMask::CREATE) {
+                if event.mask.contains(EventMask::CREATE)
+                    || event.mask.contains(EventMask::MOVED_TO)
+                {
                     let mut path = self.path.clone();
                     path.push(event.name.unwrap().to_owned());
 
                     debug!(
                         self.logger,
-                        "Created file {file}",
-                        file = &path.file_name().unwrap().to_string_lossy().into_owned()
+                        "Created file";
+                        "file" => &path.file_name().unwrap().to_string_lossy().into_owned()
                     );
                     f(watcher::Event::Created(path))
-                } else if event.mask.contains(EventMask::DELETE) {
+                } else if event.mask.contains(EventMask::DELETE)
+                    || event.mask.contains(EventMask::MOVED_FROM)
+                {
                     let mut path = self.path.clone();
                     path.push(event.name.unwrap().to_owned());
 
                     debug!(
                         self.logger,
-                        "Removed file {file}",
-                        file = &path.file_name().unwrap().to_string_lossy().into_owned()
+                        "Removed file";
+                        "file" => &path.file_name().unwrap().to_string_lossy().into_owned()
                     );
                     f(watcher::Event::Removed(path))
                 } else if event.mask.contains(EventMask::MODIFY) {
@@ -95,8 +99,8 @@ impl WatcherInner {
 
                     debug!(
                         self.logger,
-                        "file {file} modified",
-                        file = &path.file_name().unwrap().to_string_lossy().into_owned()
+                        "File modified";
+                        "file" => &path.file_name().unwrap().to_string_lossy().into_owned()
                     );
                     f(watcher::Event::Modified(path))
                 }

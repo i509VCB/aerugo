@@ -167,10 +167,8 @@ fn setup_dir_watcher(
 
     let watcher = DirWatcher::new(config_dir, logger)?;
 
-    handle.insert_source(watcher, |_event, _path, _state| {
-        todo!("Handle events from dir watcher")
-        //
-        //
+    handle.insert_source(watcher, |event, _, _state| {
+        println!("{:?}", event);
     })?;
 
     Ok(())
