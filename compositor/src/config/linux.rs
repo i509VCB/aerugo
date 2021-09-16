@@ -43,7 +43,11 @@ impl WatcherInner {
         let path = &watching.to_string_lossy().into_owned();
         let watch = inotify.add_watch(
             &watching,
-            WatchMask::CREATE | WatchMask::DELETE | WatchMask::MODIFY | WatchMask::MOVED_FROM | WatchMask::MOVED_TO,
+            WatchMask::CREATE
+                | WatchMask::DELETE
+                | WatchMask::MODIFY
+                | WatchMask::MOVED_FROM
+                | WatchMask::MOVED_TO,
         )?;
 
         let logger = logger.new(slog::o!(
