@@ -1,31 +1,47 @@
 use std::{
     io,
-    os::unix::prelude::AsRawFd,
     path::{Path, PathBuf},
+    thread::JoinHandle,
 };
 
 use slog::Logger;
 use smithay::reexports::calloop::{
-    EventSource, Interest, Mode, Poll, PostAction, Readiness, Token, TokenFactory,
+    channel::{self, sync_channel, Channel},
+    EventSource, Poll, PostAction, Readiness, Token, TokenFactory,
 };
 
-#[cfg(target_os = "linux")]
-use crate::config::linux::*;
-
-#[cfg(not(target_os = "linux"))]
-compile_error!("No config watcher implementation outside of linux at the moment.");
+use crate::config::imp::*;
 
 #[derive(Debug)]
 pub struct DirWatcher {
-    inner: WatcherInner,
+    channel: Channel<Event>,
+    watch_thread: JoinHandle<()>,
+    logger: Logger,
 }
 
 impl DirWatcher {
     pub fn new(watching: &(impl AsRef<Path> + ?Sized), logger: Logger) -> io::Result<DirWatcher> {
-        let path = watching.as_ref().to_owned();
-        let inner = WatcherInner::new(path, logger)?;
+        let (channel, watch_thread) = start_watcher(watching.as_ref().to_owned(), logger.clone())?;
 
-        Ok(DirWatcher { inner })
+        Ok(DirWatcher {
+            channel,
+            watch_thread,
+            logger,
+        })
+    }
+}
+
+impl Drop for DirWatcher {
+    fn drop(&mut self) {
+        {
+            // Signal the worker thread to exit by dropping the read end of the channel.
+            // There is no easy and nice way to do this, so do it the ugly way: Replace it.
+            let (_, channel) = sync_channel(1);
+            self.channel = channel;
+        }
+
+        // Unpark the thread to instantly shut down
+        self.watch_thread.thread().unpark();
     }
 }
 
@@ -38,41 +54,36 @@ impl EventSource for DirWatcher {
 
     fn process_events<F>(
         &mut self,
-        _readiness: Readiness,
-        _token: Token,
+        readiness: Readiness,
+        token: Token,
         mut callback: F,
     ) -> io::Result<PostAction>
     where
         F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
     {
-        self.inner.read_events(|event| {
-            // We clone the path here so callbacks cannot change the path.
-            callback(event, &mut ())
-        })?;
+        self.channel
+            .process_events(readiness, token, |event, _| match event {
+                channel::Event::Msg(event) => {
+                    if let Event::ThreadWakeup = event {
+                    } else {
+                        callback(event, &mut ());
+                    }
+                }
 
-        Ok(PostAction::Continue)
+                channel::Event::Closed => (),
+            })
     }
 
     fn register(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
-        poll.register(
-            self.inner.as_raw_fd(),
-            Interest::READ,
-            Mode::Level,
-            token_factory.token(),
-        )
+        self.channel.register(poll, token_factory)
     }
 
     fn reregister(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
-        poll.reregister(
-            self.inner.as_raw_fd(),
-            Interest::READ,
-            Mode::Level,
-            token_factory.token(),
-        )
+        self.channel.reregister(poll, token_factory)
     }
 
     fn unregister(&mut self, poll: &mut Poll) -> io::Result<()> {
-        poll.unregister(self.inner.as_raw_fd())
+        self.channel.unregister(poll)
     }
 }
 
@@ -87,6 +98,12 @@ pub enum Event {
 
     /// The file has been removed.
     Removed(PathBuf),
+
+    /// The watch thread was waken up and will check for changes.
+    ///
+    /// This event is never exposed to users and is, only used internally.
+    #[doc(hidden)]
+    ThreadWakeup,
 }
 
 #[cfg(test)]

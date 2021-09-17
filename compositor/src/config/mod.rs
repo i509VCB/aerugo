@@ -1,4 +1,8 @@
 pub mod watcher;
 
 #[cfg(target_os = "linux")]
-mod linux;
+#[path = "./linux.rs"]
+mod imp;
+
+#[cfg(not(target_os = "linux"))]
+compile_error!("No config watcher implementation outside of linux at the moment.");
