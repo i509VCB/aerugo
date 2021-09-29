@@ -11,11 +11,12 @@ use super::Backend;
 pub struct WaylandBackend;
 
 impl Backend for WaylandBackend {
-    fn run(_logger: Logger) -> Result<(), Box<dyn Error>>
+    fn run(socket: Socket, logger: Logger) -> Result<(), Box<dyn Error>>
     where
         Self: Sized,
     {
-        todo!()
+        let backend = WaylandBackend;
+        run(logger, backend, socket)
     }
 
     fn available() -> bool
@@ -29,12 +30,8 @@ impl Backend for WaylandBackend {
         todo!("Wayland backend not implemented yet")
     }
 
-    fn setup_globals(
-        &mut self,
-        _display: &mut Display,
-        _logger: Logger,
-    ) -> Result<(), Box<dyn Error>> {
-        todo!()
+    fn setup_globals(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
+        todo!("Wayland backend not implemented yet")
     }
 
     fn name(&self) -> &str {

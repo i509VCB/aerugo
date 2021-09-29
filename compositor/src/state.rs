@@ -56,7 +56,7 @@ impl State {
             setup_globals(display, logger.clone())?;
 
             // Setup any backend originating globals, such as wl_drm and outputs.
-            backend.setup_globals(display, logger.clone())?;
+            backend.setup_globals(display)?;
 
             // Initialize the shell, in our case the XDG and Layer shell
             Shell::new(display, logger.clone())?

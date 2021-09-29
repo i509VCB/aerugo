@@ -2,7 +2,7 @@ use std::{error::Error, process, thread, time::Duration};
 
 use clap::{ArgGroup, Clap};
 use slog::{error, o, Drain, Logger};
-use wayland_compositor::backend::Backend;
+use wayland_compositor::{backend::Backend, state::Socket};
 
 #[cfg(feature = "wayland_backend")]
 use wayland_compositor::backend::wayland::WaylandBackend;
@@ -21,7 +21,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let _guard = slog_scope::set_global_logger(logger.clone());
     slog_stdlog::init().expect("Could not setup logging backend");
 
-    if let Err(err) = args.backend.run(logger.clone()) {
+    // TODO: Configurable socket setup
+    if let Err(err) = args.backend.run(logger.clone(), Socket::Auto) {
         match err {
             StartError::NoBackendAvailable => {
                 error!(logger, "No backends available to start the compositor");
@@ -37,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-#[derive(Debug, Clap)]
+#[derive(Debug, Clone, Copy, Clap)]
 struct Args {
     #[clap(flatten)]
     backend: BackendSelection,
@@ -56,7 +57,7 @@ impl From<Box<dyn Error>> for StartError {
     }
 }
 
-#[derive(Debug, Clap)]
+#[derive(Debug, Clone, Copy, Clap)]
 #[clap(group = ArgGroup::new("backend").required(false).multiple(false))]
 struct BackendSelection {
     /// Run the compositor inside an existing session as a window.
@@ -96,7 +97,7 @@ struct BackendSelection {
 }
 
 impl BackendSelection {
-    fn run(self, logger: Logger) -> Result<(), StartError> {
+    fn run(self, logger: Logger, socket: Socket) -> Result<(), StartError> {
         // ArgGroup requirements mean only 1 boolean will be set
 
         #[cfg(any(feature = "wayland_backend", feature = "x11_backend"))]
@@ -107,7 +108,7 @@ impl BackendSelection {
                 #[cfg(feature = "wayland_backend")]
                 {
                     if WaylandBackend::available() {
-                        return Ok(WaylandBackend::run(logger)?);
+                        return Ok(WaylandBackend::run(logger, socket)?);
                     }
                 }
 
@@ -115,7 +116,7 @@ impl BackendSelection {
                 #[cfg(feature = "x11_backend")]
                 {
                     if X11Backend::available() {
-                        return Ok(X11Backend::run(logger)?);
+                        return Ok(X11Backend::run(logger, socket)?);
                     }
                 }
 
@@ -126,14 +127,14 @@ impl BackendSelection {
         #[cfg(feature = "wayland_backend")]
         {
             if self.wayland {
-                return Ok(WaylandBackend::run(logger)?);
+                return Ok(WaylandBackend::run(logger, socket)?);
             }
         }
 
         #[cfg(feature = "x11_backend")]
         {
             if self.x11 {
-                return Ok(X11Backend::run(logger)?);
+                return Ok(X11Backend::run(logger, socket)?);
             }
         }
 
@@ -150,7 +151,7 @@ impl BackendSelection {
         {
             // Try Wayland as first fallback if enabled
             if WaylandBackend::available() {
-                return Ok(WaylandBackend::run(logger)?);
+                return Ok(WaylandBackend::run(logger, socket)?);
             }
         }
 
@@ -158,7 +159,7 @@ impl BackendSelection {
         {
             // Then try X as fallback
             if X11Backend::available() {
-                return Ok(X11Backend::run(logger)?);
+                return Ok(X11Backend::run(logger, socket)?);
             }
         }
 
