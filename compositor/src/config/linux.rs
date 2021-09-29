@@ -14,7 +14,7 @@ use super::watcher;
 pub fn start_watcher(
     watching: PathBuf,
     logger: Logger,
-) -> io::Result<(Channel<super::watcher::Event>, JoinHandle<()>)> {
+) -> io::Result<(Channel<watcher::Event>, JoinHandle<()>)> {
     // Make sure the path to the directory we are watching exists.
     fs::create_dir_all(&watching)?;
 

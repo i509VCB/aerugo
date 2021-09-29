@@ -1,7 +1,7 @@
 #![warn(missing_debug_implementations)]
 
-#[cfg(not(any(feature = "winit", feature = "udev", feature = "wlcs")))]
-compile_error!("winit, udev or wlcs feature(s) must be enabled");
+#[cfg(not(any(feature = "x11_backend", feature = "udev", feature = "wlcs")))]
+compile_error!("x11_backend, udev or wlcs feature(s) must be enabled");
 
 pub mod backend;
 mod config;

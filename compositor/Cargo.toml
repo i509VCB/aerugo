@@ -15,7 +15,6 @@ slog-stdlog = "4.1.0"
 slog-scope = "4.4.0"
 
 directories = "3.0.2"
-inotify = { version = "0.9.3", default-features = false }
 
 [dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
@@ -24,7 +23,6 @@ features = [
     "slog-stdlog",
     "use_system_lib",
     "wayland_frontend",
-    "backend_winit"
 ]
 
 [dependencies.x11rb]
@@ -35,7 +33,25 @@ features = [
     "composite"
 ]
 
+# Platform dependencies for the config watcher
+[target.'cfg(target_os = "linux")'.dependencies]
+inotify = { version = "0.9.3", default-features = false }
+
 [features]
-default = [ "winit" ] # I would add xwayland here, since I use the JVM a lot. However until other stuff is in place, there is little to enabling xwayland.
-winit = [ "smithay/backend_winit" ]
+# TODO:
+# - Enable udev backend when done.
+# - Enable wayland backend when implemented.
+# - XWayland
+default = [ "x11_backend" ]
+
+# X11 backend to run as an X11 client.
+x11_backend = []
+
+# Wayland backend to run as a Wayland client.
+wayland_backend = []
+
+# Udev tty backend
+udev_backend = []
+
+# XWayland
 xwayland = [ "smithay/xwayland", "x11rb" ]
