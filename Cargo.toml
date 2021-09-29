@@ -2,3 +2,8 @@
 members = [
 	"compositor"
 ]
+
+# Enable LTO during release to make the binaries a bit smaller
+[profile.release]
+lto = true
+opt-level = 'z'
