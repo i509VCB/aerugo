@@ -1,4 +1,4 @@
-use std::{error::Error, process, thread, time::Duration};
+use std::{error::Error, process};
 
 use clap::{ArgGroup, Clap};
 use slog::{error, o, Drain, Logger};
@@ -26,8 +26,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         match err {
             StartError::NoBackendAvailable => {
                 error!(logger, "No backends available to start the compositor");
-                // Let the logger flush to output.
-                thread::sleep(Duration::from_millis(500));
                 process::exit(1)
             }
 
