@@ -1,4 +1,4 @@
-use std::{error::Error, process};
+use std::{error::Error, mem, process, thread, time::Duration};
 
 use clap::{ArgGroup, Clap};
 use slog::{error, o, Drain, Logger};
@@ -18,14 +18,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         o!(),
     );
 
-    let _guard = slog_scope::set_global_logger(logger.clone());
+    let guard = slog_scope::set_global_logger(logger.clone());
     slog_stdlog::init().expect("Could not setup logging backend");
+    // Leak the logger's scope for the entire span of the program.
+    mem::forget(guard);
 
     // TODO: Configurable socket setup
     if let Err(err) = args.backend.run(logger.clone(), Socket::Auto) {
         match err {
             StartError::NoBackendAvailable => {
                 error!(logger, "No backends available to start the compositor");
+                thread::sleep(Duration::from_millis(50)); // Wait for the logger to flush async.
                 process::exit(1)
             }
 
