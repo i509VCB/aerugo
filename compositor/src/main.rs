@@ -2,7 +2,7 @@ use std::{error::Error, mem, process, thread, time::Duration};
 
 use clap::{ArgGroup, Clap};
 use slog::{error, o, Drain, Logger};
-use wayland_compositor::{backend::Backend, state::Socket};
+use wayland_compositor::{backend::Backend, run, state::Socket};
 
 #[cfg(feature = "wayland_backend")]
 use wayland_compositor::backend::wayland::WaylandBackend;
@@ -109,7 +109,7 @@ impl BackendSelection {
                 #[cfg(feature = "wayland_backend")]
                 {
                     if WaylandBackend::available() {
-                        return Ok(WaylandBackend::run(logger, socket)?);
+                        return Ok(run(logger.clone(), WaylandBackend::new(logger), socket)?);
                     }
                 }
 
@@ -117,7 +117,7 @@ impl BackendSelection {
                 #[cfg(feature = "x11_backend")]
                 {
                     if X11Backend::available() {
-                        return Ok(X11Backend::run(logger, socket)?);
+                        return Ok(run(logger.clone(), X11Backend::new(logger), socket)?);
                     }
                 }
 
@@ -128,14 +128,14 @@ impl BackendSelection {
         #[cfg(feature = "wayland_backend")]
         {
             if self.wayland {
-                return Ok(WaylandBackend::run(logger, socket)?);
+                return Ok(run(logger.clone(), WaylandBackend::new(logger), socket)?);
             }
         }
 
         #[cfg(feature = "x11_backend")]
         {
             if self.x11 {
-                return Ok(X11Backend::run(logger, socket)?);
+                return Ok(run(logger.clone(), X11Backend::new(logger), socket)?);
             }
         }
 
@@ -152,7 +152,11 @@ impl BackendSelection {
         {
             // Try Wayland as first fallback if enabled
             if WaylandBackend::available() {
-                return Ok(WaylandBackend::run(logger, socket)?);
+                return Ok(run(
+                    logger.clone(),
+                    WaylandBackend::new(logger.clone()),
+                    socket,
+                )?);
             }
         }
 
@@ -160,7 +164,7 @@ impl BackendSelection {
         {
             // Then try X as fallback
             if X11Backend::available() {
-                return Ok(X11Backend::run(logger, socket)?);
+                return Ok(run(logger.clone(), X11Backend::new(logger), socket)?);
             }
         }
 

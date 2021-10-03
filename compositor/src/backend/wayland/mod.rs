@@ -11,12 +11,11 @@ use super::Backend;
 pub struct WaylandBackend;
 
 impl Backend for WaylandBackend {
-    fn run(socket: Socket, logger: Logger) -> Result<(), Box<dyn Error>>
+    fn instantiate(_logger: Logger) -> Self
     where
         Self: Sized,
     {
-        let backend = WaylandBackend;
-        run(logger, backend, socket)
+        WaylandBackend
     }
 
     fn available() -> bool

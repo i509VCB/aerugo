@@ -3,10 +3,7 @@ use std::{env, error::Error};
 use slog::Logger;
 use smithay::reexports::{calloop::LoopHandle, wayland_server::Display};
 
-use crate::{
-    run,
-    state::{Socket, State},
-};
+use crate::state::State;
 
 use super::Backend;
 
@@ -14,12 +11,11 @@ use super::Backend;
 pub struct X11Backend;
 
 impl Backend for X11Backend {
-    fn run(logger: Logger, socket: Socket) -> Result<(), Box<dyn Error>>
+    fn new(_logger: Logger) -> Self
     where
         Self: Sized,
     {
-        let backend = X11Backend;
-        run(logger, backend, socket)
+        X11Backend
     }
 
     fn available() -> bool

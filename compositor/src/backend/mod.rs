@@ -12,7 +12,7 @@ use std::{error::Error, fmt};
 use slog::Logger;
 use smithay::reexports::{calloop::LoopHandle, wayland_server::Display};
 
-use crate::state::{Socket, State};
+use crate::state::State;
 
 /// A trait specifying the implementation of a backend.
 ///
@@ -26,10 +26,7 @@ use crate::state::{Socket, State};
 /// Data may be accessed in most places through [`State::backend`] or [`State::backend_mut`] inside of callbacks or
 /// [`DispatchData`](smithay::reexports::wayland_server::DispatchData) and then downcast to the backend internal type.
 pub trait Backend: fmt::Debug {
-    /// Starts the compositor.
-    ///
-    /// In this function the backend should instantiate itself and invoke [`crate::run`] to start the compositor.
-    fn run(logger: Logger, socket: Socket) -> Result<(), Box<dyn Error>>
+    fn new(logger: Logger) -> Self
     where
         Self: Sized;
 
