@@ -11,7 +11,7 @@ use super::Backend;
 pub struct WaylandBackend;
 
 impl Backend for WaylandBackend {
-    fn instantiate(_logger: Logger) -> Self
+    fn new(_logger: Logger) -> Self
     where
         Self: Sized,
     {
