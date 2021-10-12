@@ -1,4 +1,8 @@
-use std::{error::Error, mem, process, thread, time::Duration};
+use std::{
+    error::Error,
+    fmt::{self, Formatter},
+    sync::Mutex,
+};
 
 use clap::{ArgGroup, Clap};
 use slog::{error, o, Drain, Logger};
@@ -12,24 +16,24 @@ use wayland_compositor::backend::x11::X11Backend;
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    // Initialize logger
-    let logger = Logger::root(
-        slog_async::Async::default(slog_term::term_full().fuse()).fuse(),
-        o!(),
-    );
+    let logger = if args.debug_logger {
+        Logger::root(Mutex::new(slog_term::term_full().fuse()).fuse(), o!())
+    } else {
+        Logger::root(
+            slog_async::Async::default(slog_term::term_full().fuse()).fuse(),
+            o!(),
+        )
+    };
 
-    let guard = slog_scope::set_global_logger(logger.clone());
+    let _guard = slog_scope::set_global_logger(logger.clone());
     slog_stdlog::init().expect("Could not setup logging backend");
-    // Leak the logger's scope for the entire span of the program.
-    mem::forget(guard);
 
     // TODO: Configurable socket setup
     if let Err(err) = args.backend.run(logger.clone(), Socket::Auto) {
         match err {
             StartError::NoBackendAvailable => {
                 error!(logger, "No backends available to start the compositor");
-                thread::sleep(Duration::from_millis(50)); // Wait for the logger to flush async.
-                process::exit(1)
+                Err(err.into())
             }
 
             StartError::Other(err) => Err(err),
@@ -43,6 +47,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 struct Args {
     #[clap(flatten)]
     backend: BackendSelection,
+
+    /// Whether the compositor should use the slower mutex logger over the async logger.
+    #[clap(long)]
+    debug_logger: bool,
 }
 
 #[derive(Debug)]
@@ -57,6 +65,17 @@ impl From<Box<dyn Error>> for StartError {
         StartError::Other(err)
     }
 }
+
+impl fmt::Display for StartError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            StartError::NoBackendAvailable => write!(f, "No suitable backend was available"),
+            StartError::Other(err) => fmt::Display::fmt(err, f),
+        }
+    }
+}
+
+impl Error for StartError {}
 
 #[derive(Debug, Clone, Copy, Clap)]
 #[clap(group = ArgGroup::new("backend").required(false).multiple(false))]
