@@ -6,7 +6,7 @@ use std::{
 };
 
 use inotify::{EventMask, Inotify, WatchMask};
-use slog::{debug, info, Logger};
+use slog::{Logger, debug, error, info};
 use smithay::reexports::calloop::{self, channel::Channel};
 
 use super::watcher;
@@ -48,59 +48,68 @@ pub fn start_watcher(
                 break;
             }
 
-            let mut loop_error = false;
+            let mut channel_closed = false;
 
-            for event in inotify.read_events(&mut buffer).expect("TODO: IO error") {
-                if event.wd == watch {
-                    loop_error = if event.mask.contains(EventMask::CREATE)
-                        || event.mask.contains(EventMask::MOVED_TO)
-                    {
-                        let mut path = watching.clone();
-                        path.push(event.name.unwrap().to_owned());
+            match inotify.read_events(&mut buffer) {
+                Ok(events) => {
+                    for event in events {
+                        if event.wd == watch {
+                            channel_closed = if event.mask.contains(EventMask::CREATE)
+                                || event.mask.contains(EventMask::MOVED_TO)
+                            {
+                                let mut path = watching.clone();
+                                path.push(event.name.unwrap());
 
-                        debug!(
-                            logger,
-                            "Created dir entry";
-                            "entry" => &path.file_name().unwrap().to_string_lossy().into_owned()
-                        );
+                                debug!(
+                                    logger,
+                                    "Created dir entry";
+                                    "entry" => &path.file_name().unwrap().to_string_lossy().into_owned()
+                                );
 
-                        sender.send(watcher::Event::Created(path))
-                    } else if event.mask.contains(EventMask::DELETE)
-                        || event.mask.contains(EventMask::MOVED_FROM)
-                    {
-                        let mut path = watching.clone();
-                        path.push(event.name.unwrap().to_owned());
+                                sender.send(watcher::Event::Created(path))
+                            } else if event.mask.contains(EventMask::DELETE)
+                                || event.mask.contains(EventMask::MOVED_FROM)
+                            {
+                                let mut path = watching.clone();
+                                path.push(event.name.unwrap());
 
-                        debug!(
-                            logger,
-                            "Removed dir entry";
-                            "entry" => &path.file_name().unwrap().to_string_lossy().into_owned()
-                        );
+                                debug!(
+                                    logger,
+                                    "Removed dir entry";
+                                    "entry" => &path.file_name().unwrap().to_string_lossy().into_owned()
+                                );
 
-                        sender.send(watcher::Event::Removed(path))
-                    } else if event.mask.contains(EventMask::MODIFY) {
-                        let mut path = watching.clone();
-                        path.push(event.name.unwrap().to_owned());
+                                sender.send(watcher::Event::Removed(path))
+                            } else if event.mask.contains(EventMask::MODIFY) {
+                                let mut path = watching.clone();
+                                path.push(event.name.unwrap());
 
-                        debug!(
-                            logger,
-                            "Entry modified";
-                            "modified" => &path.file_name().unwrap().to_string_lossy().into_owned()
-                        );
+                                debug!(
+                                    logger,
+                                    "Entry modified";
+                                    "modified" => &path.file_name().unwrap().to_string_lossy().into_owned()
+                                );
 
-                        sender.send(watcher::Event::Modified(path))
-                    } else {
-                        Ok(())
+                                sender.send(watcher::Event::Modified(path))
+                            } else {
+                                Ok(())
+                            }
+                            .is_err();
+                        }
+
+                        if channel_closed {
+                            break;
+                        }
                     }
-                    .is_err();
                 }
 
-                if loop_error {
+                Err(err) => {
+                    error!(logger, "Error while reading events {}", err);
                     break;
                 }
             }
 
-            if loop_error {
+            if channel_closed {
                 break;
             }
 
