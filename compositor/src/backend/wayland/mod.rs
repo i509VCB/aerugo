@@ -11,11 +11,15 @@ use super::Backend;
 pub struct WaylandBackend;
 
 impl Backend for WaylandBackend {
-    fn new(_logger: Logger) -> Self
+    fn init(
+        _logger: Logger,
+        _handle: LoopHandle<'static, State>,
+        _display: &mut Display,
+    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
     where
         Self: Sized,
     {
-        WaylandBackend
+        Ok(Box::new(WaylandBackend))
     }
 
     fn available() -> bool
@@ -25,15 +29,11 @@ impl Backend for WaylandBackend {
         env::var("WAYLAND_DISPLAY").is_ok()
     }
 
-    fn setup_backend(&mut self, _handle: LoopHandle<'static, State>) -> Result<(), Box<dyn Error>> {
-        todo!("Wayland backend not implemented yet")
-    }
-
-    fn setup_globals(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
-        todo!("Wayland backend not implemented yet")
-    }
-
     fn name(&self) -> &str {
         "wayland"
+    }
+
+    fn logger(&self) -> &Logger {
+        todo!()
     }
 }

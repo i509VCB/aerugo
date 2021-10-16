@@ -21,12 +21,18 @@ use std::{cell::RefCell, error::Error, rc::Rc};
 
 use backend::Backend;
 use slog::Logger;
-use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
+use smithay::reexports::{
+    calloop::{EventLoop, LoopHandle},
+    wayland_server::Display,
+};
 
 use crate::state::{Socket, State};
 
+pub type CreateBackendFn =
+    fn(Logger, LoopHandle<'static, State>, &mut Display) -> Result<Box<dyn Backend + 'static>, Box<dyn Error>>;
+
 /// The main entrypoint of the compositor.
-pub fn run(logger: Logger, backend: impl Backend + 'static, socket: Socket) -> Result<(), Box<dyn Error>> {
+pub fn run(logger: Logger, backend: CreateBackendFn, socket: Socket) -> Result<(), Box<dyn Error>> {
     let display = Rc::new(RefCell::new(Display::new()));
     let mut event_loop = EventLoop::try_new()?;
     let mut state = State::new(logger, event_loop.handle(), display, socket, backend)?;

@@ -1,21 +1,43 @@
 use std::{env, error::Error};
 
-use slog::Logger;
-use smithay::reexports::{calloop::LoopHandle, wayland_server::Display};
+use slog::{info, Logger};
+use smithay::{
+    backend::{self, x11::X11Event},
+    reexports::{calloop::LoopHandle, wayland_server::Display},
+};
 
 use crate::state::State;
 
 use super::Backend;
 
 #[derive(Debug)]
-pub struct X11Backend;
+pub struct X11Backend {
+    logger: Logger,
+}
 
 impl Backend for X11Backend {
-    fn new(_logger: Logger) -> Self
+    fn init(
+        logger: Logger,
+        handle: LoopHandle<'static, State>,
+        _display: &mut Display,
+    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
     where
         Self: Sized,
     {
-        X11Backend
+        let (backend, _surface) = backend::x11::X11Backend::new(logger.clone())?;
+        let logger = logger.new(slog::o!("backend" => "x11"));
+
+        #[allow(clippy::single_match)] // temporary
+        handle.insert_source(backend, |event, _window, state| match event {
+            X11Event::CloseRequested => {
+                info!(state.backend().logger(), "Closing compositor");
+                state.continue_loop = false;
+            }
+
+            _ => (),
+        })?;
+
+        Ok(Box::new(X11Backend { logger }))
     }
 
     fn available() -> bool
@@ -25,15 +47,11 @@ impl Backend for X11Backend {
         env::var("DISPLAY").is_ok()
     }
 
-    fn setup_backend(&mut self, _handle: LoopHandle<'static, State>) -> Result<(), Box<dyn Error>> {
-        todo!("X11 backend not implemented yet")
-    }
-
-    fn setup_globals(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
-        todo!("X11 backend not implemented yet")
-    }
-
     fn name(&self) -> &str {
         "x11"
+    }
+
+    fn logger(&self) -> &Logger {
+        &self.logger
     }
 }

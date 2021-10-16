@@ -26,7 +26,11 @@ use crate::state::State;
 /// Data may be accessed in most places through [`State::backend`] or [`State::backend_mut`] inside of callbacks or
 /// [`DispatchData`](smithay::reexports::wayland_server::DispatchData) and then downcast to the backend internal type.
 pub trait Backend: fmt::Debug {
-    fn new(logger: Logger) -> Self
+    fn init(
+        _logger: Logger,
+        _handle: LoopHandle<'static, State>,
+        _display: &mut Display,
+    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
     where
         Self: Sized;
 
@@ -37,18 +41,13 @@ pub trait Backend: fmt::Debug {
     where
         Self: Sized;
 
-    /// The backend should perform any required setup at this point.
-    ///
-    /// A backend may insert any event sources it needs into the event loop at this point using the `handle`.
-    fn setup_backend(&mut self, handle: LoopHandle<'static, State>) -> Result<(), Box<dyn Error>>;
-
-    /// The backend should perform any setup needed on the Wayland Display at this point.
-    ///
-    /// A backend may instantiate any globals it needs at this point in order to receive requests from clients.
-    fn setup_globals(&mut self, display: &mut Display) -> Result<(), Box<dyn Error>>;
-
     /// Returns the name of the backend.
     ///
     /// This should be a lowercase string.
     fn name(&self) -> &str;
+
+    /// Returns the logger for this backend.
+    ///
+    /// This logger may be used to log under the name of the module inside of a callback.
+    fn logger(&self) -> &Logger;
 }

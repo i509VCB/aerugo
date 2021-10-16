@@ -9,7 +9,7 @@ use smithay::{
 };
 use std::{cell::RefCell, error::Error, rc::Rc, time::Duration};
 
-use crate::{backend::Backend, config::watcher::DirWatcher, shell::Shell};
+use crate::{backend::Backend, config::watcher::DirWatcher, shell::Shell, CreateBackendFn};
 
 #[derive(Debug)]
 pub enum Socket {
@@ -39,25 +39,20 @@ impl State {
         loop_handle: LoopHandle<'static, State>,
         display: Rc<RefCell<Display>>,
         socket_name: Socket,
-        backend: impl Backend + 'static,
+        backend: CreateBackendFn,
     ) -> Result<State, Box<dyn Error>> {
-        let mut backend = Box::new(backend);
-
-        let shell = {
+        let (backend, shell) = {
             let display = &mut *display.borrow_mut();
 
             insert_wayland_source(loop_handle.clone(), display)?;
-            backend.setup_backend(loop_handle.clone())?;
-            setup_dir_watcher(loop_handle.clone(), logger.clone())?;
-
             // Initialize compositor globals
             setup_globals(display, logger.clone())?;
+            setup_dir_watcher(loop_handle.clone(), logger.clone())?;
 
-            // Setup any backend originating globals, such as wl_drm and outputs.
-            backend.setup_globals(display)?;
+            let backend = backend(logger.clone(), loop_handle.clone(), display)?;
 
             // Initialize the shell, in our case the XDG and Layer shell
-            Shell::new(display, logger.clone())?
+            (backend, Shell::new(display, logger.clone())?)
         };
 
         info!(logger, r#"Starting with backend "{backend}""#, backend = backend.name());

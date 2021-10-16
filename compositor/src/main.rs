@@ -85,7 +85,7 @@ struct BackendSelection {
     )]
     #[cfg_attr(
         all(feature = "x11_backend", not(feature = "wayland_backend")),
-        doc = "Run the compositor as a X11 client."
+        doc = "Run the compositor as an X11 client."
     )]
     #[cfg_attr(
         all(feature = "wayland_backend", feature = "x11_backend"),
@@ -125,7 +125,7 @@ impl BackendSelection {
                 #[cfg(feature = "wayland_backend")]
                 {
                     if WaylandBackend::available() {
-                        return Ok(run(logger.clone(), WaylandBackend::new(logger), socket)?);
+                        return Ok(run(logger.clone(), WaylandBackend::new, socket)?);
                     }
                 }
 
@@ -133,32 +133,32 @@ impl BackendSelection {
                 #[cfg(feature = "x11_backend")]
                 {
                     if X11Backend::available() {
-                        return Ok(run(logger.clone(), X11Backend::new(logger), socket)?);
+                        return Ok(run(logger, X11Backend::init, socket)?);
                     }
                 }
 
-                todo!("Wayland and X11 not available")
+                return Err(StartError::NoBackendAvailable);
             }
         }
 
         #[cfg(feature = "wayland_backend")]
         {
             if self.wayland {
-                return Ok(run(logger.clone(), WaylandBackend::new(logger), socket)?);
+                return Ok(run(logger, WaylandBackend::new, socket)?);
             }
         }
 
         #[cfg(feature = "x11_backend")]
         {
             if self.x11 {
-                return Ok(run(logger.clone(), X11Backend::new(logger), socket)?);
+                return Ok(run(logger, X11Backend::init, socket)?);
             }
         }
 
         #[cfg(feature = "udev_backend")]
         {
             if self.udev {
-                return Ok(run(logger.clone(), UdevBackend::new(logger), socket)?);
+                return Ok(run(logger, UdevBackend::init, socket)?);
             }
         }
 
@@ -168,7 +168,7 @@ impl BackendSelection {
         {
             // Try Wayland as first fallback if enabled
             if WaylandBackend::available() {
-                return Ok(run(logger.clone(), WaylandBackend::new(logger.clone()), socket)?);
+                return Ok(run(logger, WaylandBackend::new, socket)?);
             }
         }
 
@@ -176,17 +176,17 @@ impl BackendSelection {
         {
             // Then try X as fallback
             if X11Backend::available() {
-                return Ok(run(logger.clone(), X11Backend::new(logger), socket)?);
+                return Ok(run(logger, X11Backend::init, socket)?);
             }
         }
 
         #[cfg(feature = "udev_backend")]
         {
-            return Ok(run(logger.clone(), UdevBackend::new(logger), socket)?);
+            if UdevBackend::available() {
+                return Ok(run(logger, UdevBackend::init, socket)?);
+            }
         }
 
-        // This may not always be reachable if all the features are enabled.
-        #[allow(unreachable_code)]
         Err(StartError::NoBackendAvailable)
     }
 }

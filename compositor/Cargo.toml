@@ -35,7 +35,11 @@ inotify = { version = "0.9.5", default-features = false }
 # - Enable udev backend when done.
 # - Enable wayland backend when implemented.
 # - XWayland
-default = [ "x11_backend", "wayland_backend", "udev_backend" ]
+default = [
+    "x11_backend",
+    #"wayland_backend",
+    "udev_backend"
+]
 
 # X11 backend to run as an X11 client.
 x11_backend = [ "smithay/backend_x11" ]

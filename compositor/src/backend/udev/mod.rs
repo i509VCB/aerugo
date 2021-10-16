@@ -14,11 +14,15 @@ use super::Backend;
 pub struct UdevBackend;
 
 impl Backend for UdevBackend {
-    fn new(_logger: Logger) -> Self
+    fn init(
+        _logger: Logger,
+        _handle: LoopHandle<'static, State>,
+        _display: &mut Display,
+    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
     where
         Self: Sized,
     {
-        UdevBackend
+        Ok(Box::new(UdevBackend))
     }
 
     fn available() -> bool
@@ -29,15 +33,11 @@ impl Backend for UdevBackend {
         AutoSession::new(None).is_some()
     }
 
-    fn setup_backend(&mut self, _handle: LoopHandle<'static, State>) -> Result<(), Box<dyn Error>> {
-        todo!("Udev backend is not implemented yet")
-    }
-
-    fn setup_globals(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
-        todo!("Udev backend is not implemented yet")
-    }
-
     fn name(&self) -> &str {
         "udev"
+    }
+
+    fn logger(&self) -> &Logger {
+        todo!()
     }
 }
