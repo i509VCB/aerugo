@@ -47,10 +47,8 @@ impl State {
             let display = &mut *display.borrow_mut();
 
             insert_wayland_source(loop_handle.clone(), display)?;
-
+            backend.setup_backend(loop_handle.clone())?;
             setup_dir_watcher(loop_handle.clone(), logger.clone())?;
-
-            backend.setup_backend(loop_handle)?;
 
             // Initialize compositor globals
             setup_globals(display, logger.clone())?;
@@ -61,6 +59,8 @@ impl State {
             // Initialize the shell, in our case the XDG and Layer shell
             Shell::new(display, logger.clone())?
         };
+
+        info!(logger, r#"Starting with backend "{backend}""#, backend = backend.name());
 
         let socket_name = {
             match socket_name {
@@ -81,11 +81,9 @@ impl State {
             }
         };
 
-        info!(
-            logger,
-            r#"Starting with backend "{backend}""#,
-            backend = backend.name()
-        );
+        if let Some(socket_name) = &socket_name {
+            info!(logger, "Listening on wayland socket"; "name" => socket_name);
+        }
 
         Ok(State {
             logger,
@@ -97,8 +95,8 @@ impl State {
         })
     }
 
-    pub fn socket_name(&self) -> Option<String> {
-        self.socket_name.clone()
+    pub fn socket_name(&self) -> Option<&str> {
+        self.socket_name.as_ref().map(|s| s as &str)
     }
 
     pub fn backend(&self) -> &dyn Backend {
@@ -124,16 +122,10 @@ impl State {
 
         true
     }
-
-    // TODO: Have outputs as the render target?
-    pub fn render(&mut self) {}
 }
 
 /// Inserts a Wayland source into the loop.
-fn insert_wayland_source(
-    handle: LoopHandle<'static, State>,
-    display: &Display,
-) -> Result<(), Box<dyn Error>> {
+fn insert_wayland_source(handle: LoopHandle<'static, State>, display: &Display) -> Result<(), Box<dyn Error>> {
     handle.insert_source(
         Generic::from_fd(
             display.get_poll_fd(), // The file descriptor which indicates there are pending messages
@@ -157,10 +149,7 @@ fn insert_wayland_source(
     Ok(())
 }
 
-fn setup_dir_watcher(
-    handle: LoopHandle<'static, State>,
-    logger: Logger,
-) -> Result<(), Box<dyn Error>> {
+fn setup_dir_watcher(handle: LoopHandle<'static, State>, logger: Logger) -> Result<(), Box<dyn Error>> {
     let project_dirs = ProjectDirs::from("", "i5", "wayland_compositor").unwrap();
 
     let config_dir = project_dirs.config_dir();
@@ -181,10 +170,7 @@ fn setup_globals(display: &mut Display, logger: Logger) -> Result<(), Box<dyn Er
     compositor_init(
         display,
         move |surface, mut ddata| {
-            ddata
-                .get::<State>()
-                .unwrap()
-                .handle_surface_commit(&surface);
+            ddata.get::<State>().unwrap().handle_surface_commit(&surface);
         },
         logger.clone(),
     );

@@ -21,10 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let logger = if args.debug_logger {
         Logger::root(Mutex::new(slog_term::term_full().fuse()).fuse(), o!())
     } else {
-        Logger::root(
-            slog_async::Async::default(slog_term::term_full().fuse()).fuse(),
-            o!(),
-        )
+        Logger::root(slog_async::Async::default(slog_term::term_full().fuse()).fuse(), o!())
     };
 
     let _guard = slog_scope::set_global_logger(logger.clone());
@@ -171,11 +168,7 @@ impl BackendSelection {
         {
             // Try Wayland as first fallback if enabled
             if WaylandBackend::available() {
-                return Ok(run(
-                    logger.clone(),
-                    WaylandBackend::new(logger.clone()),
-                    socket,
-                )?);
+                return Ok(run(logger.clone(), WaylandBackend::new(logger.clone()), socket)?);
             }
         }
 

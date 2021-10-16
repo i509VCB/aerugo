@@ -52,26 +52,20 @@ impl EventSource for DirWatcher {
 
     type Ret = ();
 
-    fn process_events<F>(
-        &mut self,
-        readiness: Readiness,
-        token: Token,
-        mut callback: F,
-    ) -> io::Result<PostAction>
+    fn process_events<F>(&mut self, readiness: Readiness, token: Token, mut callback: F) -> io::Result<PostAction>
     where
         F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
     {
-        self.channel
-            .process_events(readiness, token, |event, _| match event {
-                channel::Event::Msg(event) => {
-                    if let Event::ThreadWakeup = event {
-                    } else {
-                        callback(event, &mut ());
-                    }
+        self.channel.process_events(readiness, token, |event, _| match event {
+            channel::Event::Msg(event) => {
+                if let Event::ThreadWakeup = event {
+                } else {
+                    callback(event, &mut ());
                 }
+            }
 
-                channel::Event::Closed => (),
-            })
+            channel::Event::Closed => (),
+        })
     }
 
     fn register(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
@@ -133,10 +127,7 @@ mod test {
 
         let watcher = DirWatcher::new(config_dir, logger).expect("Watcher not created");
 
-        event_loop
-            .handle()
-            .insert_source(watcher, |_event, _, _| {})
-            .unwrap();
+        event_loop.handle().insert_source(watcher, |_event, _, _| {}).unwrap();
 
         event_loop
             .run(Duration::from_millis(10), &mut (), |_| {})

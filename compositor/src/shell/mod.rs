@@ -21,14 +21,14 @@ use smithay::{
     utils::{Logical, Point, Rectangle},
     wayland::{
         compositor::{
-            self, is_sync_subsurface, with_surface_tree_downward, with_surface_tree_upward,
-            SubsurfaceCachedState, SurfaceAttributes, TraversalAction,
+            self, is_sync_subsurface, with_surface_tree_downward, with_surface_tree_upward, SubsurfaceCachedState,
+            SurfaceAttributes, TraversalAction,
         },
         shell::{
             wlr_layer::{self, wlr_layer_shell_init, LayerShellState, LayerSurface},
             xdg::{
-                xdg_shell_init, Configure, PopupConfigureError, PopupSurface, ShellState,
-                SurfaceCachedState, ToplevelSurface, XdgRequest,
+                xdg_shell_init, Configure, PopupConfigureError, PopupSurface, ShellState, SurfaceCachedState,
+                ToplevelSurface, XdgRequest,
             },
         },
     },
@@ -63,8 +63,7 @@ pub struct Shell {
 impl Shell {
     pub fn new(display: &mut Display, logger: Logger) -> Result<Shell, Box<dyn Error>> {
         let (xdg_shell_state, _, _) = xdg_shell_init(display, handle_xdg_request, logger.clone());
-        let (layer_shell_state, _) =
-            wlr_layer_shell_init(display, handle_layer_shell_request, logger);
+        let (layer_shell_state, _) = wlr_layer_shell_init(display, handle_layer_shell_request, logger);
 
         Ok(Shell {
             toplevels: vec![],
@@ -76,11 +75,7 @@ impl Shell {
     }
 
     /// Inserts a new XDG shell window into the shell.
-    pub fn new_xdg_toplevel(
-        &mut self,
-        toplevel: ToplevelSurface,
-        position: Point<i32, Logical>,
-    ) -> &mut Toplevel {
+    pub fn new_xdg_toplevel(&mut self, toplevel: ToplevelSurface, position: Point<i32, Logical>) -> &mut Toplevel {
         let mut window = Toplevel {
             inner: ToplevelInner::Xdg(toplevel),
             bbox: Default::default(),
@@ -208,8 +203,7 @@ impl Toplevel {
                             let mut position = position;
 
                             if states.role == Some("subsurface") {
-                                let current =
-                                    states.cached_state.current::<SubsurfaceCachedState>();
+                                let current = states.cached_state.current::<SubsurfaceCachedState>();
                                 position += current.location;
                             }
 
@@ -299,11 +293,7 @@ impl State {
                         .data_map
                         .insert_if_missing(|| RefCell::new(SurfaceData::default()));
 
-                    let mut data = states
-                        .data_map
-                        .get::<RefCell<SurfaceData>>()
-                        .unwrap()
-                        .borrow_mut();
+                    let mut data = states.data_map.get::<RefCell<SurfaceData>>().unwrap().borrow_mut();
 
                     data.update_buffer(&mut *states.cached_state.current::<SurfaceAttributes>())
                 },
@@ -318,17 +308,11 @@ impl State {
             handle_toplevel_commit(surface, toplevel);
         }
 
-        if let Some(popup) = shell
-            .popups_mut()
-            .find(|popup| popup.get_surface() == Some(surface))
-        {
+        if let Some(popup) = shell.popups_mut().find(|popup| popup.get_surface() == Some(surface)) {
             handle_popup_commit(surface, popup);
         }
 
-        if let Some(layer) = shell
-            .layers_mut()
-            .find(|layer| layer.get_surface() == Some(surface))
-        {
+        if let Some(layer) = shell.layers_mut().find(|layer| layer.get_surface() == Some(surface)) {
             handle_layer_commit(surface, layer);
         }
     }
@@ -368,10 +352,7 @@ fn handle_xdg_request(request: XdgRequest, mut ddata: DispatchData) {
             configure: Configure::Toplevel(_),
         } => todo!(),
 
-        XdgRequest::Fullscreen {
-            surface: _,
-            output: _,
-        } => todo!(),
+        XdgRequest::Fullscreen { surface: _, output: _ } => todo!(),
 
         XdgRequest::UnFullscreen { surface: _ } => todo!(),
 
@@ -380,10 +361,7 @@ fn handle_xdg_request(request: XdgRequest, mut ddata: DispatchData) {
         XdgRequest::UnMaximize { surface: _ } => todo!(),
 
         // Popup requests
-        XdgRequest::NewPopup {
-            surface,
-            positioner,
-        } => {
+        XdgRequest::NewPopup { surface, positioner } => {
             // Do not send a configure here, the initial configure
             // of a xdg_surface has to be sent during the commit if
             // the surface is not already configured
