@@ -8,6 +8,8 @@ use clap::{ArgGroup, Clap};
 use slog::{error, o, Drain, Logger};
 use wayland_compositor::{backend::Backend, run, state::Socket};
 
+#[cfg(feature = "udev_backend")]
+use wayland_compositor::backend::udev::UdevBackend;
 #[cfg(feature = "wayland_backend")]
 use wayland_compositor::backend::wayland::WaylandBackend;
 #[cfg(feature = "x11_backend")]
@@ -80,23 +82,21 @@ impl Error for StartError {}
 #[derive(Debug, Clone, Copy, Clap)]
 #[clap(group = ArgGroup::new("backend").required(false).multiple(false))]
 struct BackendSelection {
-    /// Run the compositor inside an existing session as a window.
-    ///
-    /// This option will automatically choose to run as a Wayland or X11 client depending on the current session.
-    ///
-    /// If you need to explicitly run the compositor as an X11 or Wayland client, use the "--x11" or "--wayland"
-    /// flag.
-    #[cfg(all(feature = "wayland_backend", feature = "x11_backend"))]
-    #[clap(long, group = "backend")]
-    windowed: bool,
-
-    /// Run the compositor as a Wayland client.
-    #[cfg(all(feature = "wayland_backend", not(feature = "x11_backend")))]
-    #[clap(long, group = "backend")]
-    windowed: bool,
-
-    /// Run the compositor as an X11 client.
-    #[cfg(all(feature = "x11_backend", not(feature = "wayland_backend")))]
+    #[cfg_attr(
+        all(feature = "wayland_backend", not(feature = "x11_backend")),
+        doc = "Run the compositor as a Wayland client."
+    )]
+    #[cfg_attr(
+        all(feature = "x11_backend", not(feature = "wayland_backend")),
+        doc = "Run the compositor as a X11 client."
+    )]
+    #[cfg_attr(
+        all(feature = "wayland_backend", feature = "x11_backend"),
+        doc = "Run the compositor inside an existing session as a window.\n\n",
+        doc = "This option will automatically choose to run as a Wayland or X11 client depending on the current session.",
+        doc = "If you need to explicitly run the compositor as an X11 or Wayland client, use the \"--x11\" or \"--wayland\" flag."
+    )]
+    #[cfg(any(feature = "wayland_backend", feature = "x11_backend"))]
     #[clap(long, group = "backend")]
     windowed: bool,
 
@@ -161,7 +161,7 @@ impl BackendSelection {
         #[cfg(feature = "udev_backend")]
         {
             if self.udev {
-                todo!("Udev backend implementation")
+                return Ok(run(logger.clone(), UdevBackend::new(logger), socket)?);
             }
         }
 
@@ -189,9 +189,11 @@ impl BackendSelection {
 
         #[cfg(feature = "udev_backend")]
         {
-            todo!("Check if udev is available")
+            return Ok(run(logger.clone(), UdevBackend::new(logger), socket)?);
         }
 
+        // This may not always be reachable if all the features are enabled.
+        #[allow(unreachable_code)]
         Err(StartError::NoBackendAvailable)
     }
 }

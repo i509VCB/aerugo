@@ -6,7 +6,7 @@ use std::{
 };
 
 use inotify::{EventMask, Inotify, WatchMask};
-use slog::{Logger, debug, error, info};
+use slog::{debug, error, info, Logger};
 use smithay::reexports::calloop::{self, channel::Channel};
 
 use super::watcher;
