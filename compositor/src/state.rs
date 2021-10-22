@@ -1,6 +1,7 @@
 use directories::ProjectDirs;
-use slog::{info, Logger};
+use slog::{error, info, Logger};
 use smithay::{
+    backend::input::{InputBackend, InputEvent},
     reexports::{
         calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
         wayland_server::Display,
@@ -33,7 +34,11 @@ pub struct State {
     shell: Shell,
 }
 
+#[warn(missing_docs)] // Use of these functions should be explicitly known.
 impl State {
+    /// Returns a new instance of the compositor state.
+    ///
+    /// This function takes another function used to instantiate the backend the compositor should use.
     pub fn new(
         logger: Logger,
         loop_handle: LoopHandle<'static, State>,
@@ -90,6 +95,7 @@ impl State {
         })
     }
 
+    /// Returns the name of the socket this compositor is exposed at.
     pub fn socket_name(&self) -> Option<&str> {
         self.socket_name.as_ref().map(|s| s as &str)
     }
@@ -126,14 +132,18 @@ impl State {
     pub fn downcast_backend_mut<B: Backend>(&mut self) -> Option<&mut B> {
         self.backend.downcast_mut()
     }
+
+    /// Returns a reference to the objects managed by the compositor's shell.
     pub fn shell(&self) -> &Shell {
         &self.shell
     }
 
+    /// Returns a unique reference to the objects managed by the compositor's shell.
     pub fn shell_mut(&mut self) -> &mut Shell {
         &mut self.shell
     }
 
+    /// Returns `true` if the compositor's event loop should shut down the compositor.
     pub fn should_continue(&mut self) -> bool {
         if !self.continue_loop {
             return false;
@@ -141,24 +151,36 @@ impl State {
 
         true
     }
+
+    /// Handles some input event.
+    ///
+    /// Any special events, as defined by the [`InputBackend::Special`] variant should not be passed into this function
+    /// and instead handled in the originating backend before calling this function
+    pub fn handle_input<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        match event {
+            InputEvent::Special(_) => unreachable!("special event encountered in common input handler"),
+            // Not implemented yet
+            _ => (),
+        }
+    }
 }
 
-/// Inserts a Wayland source into the loop.
 fn insert_wayland_source(handle: LoopHandle<'static, State>, display: &Display) -> Result<(), Box<dyn Error>> {
     handle.insert_source(
         Generic::from_fd(
-            display.get_poll_fd(), // The file descriptor which indicates there are pending messages
+            // The file descriptor which indicates there are pending messages
+            display.get_poll_fd(),
             Interest::READ,
             Mode::Level,
         ),
-        // This callback is invoked when the poll file descriptor has had activity, indicating there are pending messages.
         move |_, _, state: &mut State| {
             let display = state.display.clone();
             let mut display = display.borrow_mut();
 
-            if let Err(e) = display.dispatch(Duration::ZERO, state) {
+            if let Err(err) = display.dispatch(Duration::ZERO, state) {
+                error!(state.logger, "Error while dispatching requests"; "error" => &err);
                 state.continue_loop = false;
-                Err(e)
+                Err(err)
             } else {
                 Ok(PostAction::Continue)
             }

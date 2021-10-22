@@ -1,13 +1,5 @@
 #![warn(missing_debug_implementations)]
 
-#[cfg(not(any(
-    feature = "x11_backend",
-    feature = "wayland_backend",
-    feature = "udev_backend",
-    feature = "wlcs"
-)))]
-compile_error!("x11_backend, wayland_backend, udev_backend or wlcs feature(s) must be enabled");
-
 pub mod backend;
 mod config;
 pub mod shell;
@@ -50,6 +42,7 @@ pub fn run(logger: Logger, backend: CreateBackendFn, socket: Socket) -> Result<(
         }
 
         let display = state.display.clone();
+        // Send events to the client or else no new requests will ever come in.
         display.borrow_mut().flush_clients(state);
     })?;
 
