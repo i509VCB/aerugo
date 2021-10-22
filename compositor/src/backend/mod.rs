@@ -9,6 +9,7 @@ pub mod wayland;
 
 use std::{error::Error, fmt};
 
+use downcast_rs::{impl_downcast, Downcast};
 use slog::Logger;
 use smithay::reexports::{calloop::LoopHandle, wayland_server::Display};
 
@@ -25,7 +26,7 @@ use crate::state::State;
 ///
 /// Data may be accessed in most places through [`State::backend`] or [`State::backend_mut`] inside of callbacks or
 /// [`DispatchData`](smithay::reexports::wayland_server::DispatchData) and then downcast to the backend internal type.
-pub trait Backend: fmt::Debug {
+pub trait Backend: fmt::Debug + Downcast {
     fn init(
         _logger: Logger,
         _handle: LoopHandle<'static, State>,
@@ -51,3 +52,5 @@ pub trait Backend: fmt::Debug {
     /// This logger may be used to log under the name of the module inside of a callback.
     fn logger(&self) -> &Logger;
 }
+
+impl_downcast!(Backend);

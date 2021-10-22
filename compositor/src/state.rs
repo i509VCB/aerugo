@@ -94,14 +94,38 @@ impl State {
         self.socket_name.as_ref().map(|s| s as &str)
     }
 
+    /// Returns a dynamically typed reference to the backend in use.
+    ///
+    /// Most compositor logic should use the dynamically typed functions to get access to some of the state the backend
+    /// manages.
+    ///
+    /// Backend implementations may use [`State::downcast_backend`] to access internal data.
     pub fn backend(&self) -> &dyn Backend {
         self.backend.as_ref()
     }
 
+    /// Returns a dynamically typed unique reference to the backend in use.
+    ///
+    /// Most compositor logic should use the dynamically typed functions to mutate the state the backend.
+    ///
+    /// Backend implementations may use [`State::downcast_backend_mut`] to mutate internal data.
     pub fn backend_mut(&mut self) -> &mut dyn Backend {
         self.backend.as_mut()
     }
 
+    /// Returns a reference to the backend in use by the compositor.
+    ///
+    /// You must know the type of the backend ahead of time in order to resolve a reference to the backend.
+    pub fn downcast_backend<B: Backend>(&self) -> Option<&B> {
+        self.backend.downcast_ref()
+    }
+
+    /// Returns a unique to the backend in use by the compositor.
+    ///
+    /// You must know the type of the backend ahead of time in order to resolve a unique reference to the backend.
+    pub fn downcast_backend_mut<B: Backend>(&mut self) -> Option<&mut B> {
+        self.backend.downcast_mut()
+    }
     pub fn shell(&self) -> &Shell {
         &self.shell
     }

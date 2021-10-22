@@ -906,6 +906,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "directories",
+ "downcast-rs",
  "inotify",
  "slog",
  "slog-async",
