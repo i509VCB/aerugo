@@ -62,7 +62,7 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(display: &mut Display, logger: Logger) -> Result<Shell, Box<dyn Error>> {
-        let (xdg_shell_state, _, _) = xdg_shell_init(display, handle_xdg_request, logger.clone());
+        let (xdg_shell_state, _) = xdg_shell_init(display, handle_xdg_request, logger.clone());
         let (layer_shell_state, _) = wlr_layer_shell_init(display, handle_layer_shell_request, logger);
 
         Ok(Shell {

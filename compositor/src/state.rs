@@ -157,6 +157,7 @@ impl State {
     /// Any special events, as defined by the [`InputBackend::Special`] variant should not be passed into this function
     /// and instead handled in the originating backend before calling this function
     pub fn handle_input<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        #[allow(clippy::single_match)] // temporary
         match event {
             InputEvent::Special(_) => unreachable!("special event encountered in common input handler"),
             // Not implemented yet

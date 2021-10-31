@@ -7,7 +7,7 @@ publish = false
 edition = "2018"
 
 [dependencies]
-clap = { version = "3.0.0-beta.4", features = [ "derive" ] }
+clap = { version = "3.0.0-beta.5", features = [ "derive" ] }
 slog = "2.1.1"
 slog-term = "2.8"
 slog-async = "2.2"
@@ -17,8 +17,7 @@ downcast-rs = "1.2.0"
 directories = "4.0.1"
 
 [dependencies.smithay]
-git = "https://github.com/i509VCB/smithay"
-branch = "x-client"
+git = "https://github.com/Smithay/smithay"
 default-features = false
 features = [
     "slog-stdlog",

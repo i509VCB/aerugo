@@ -4,7 +4,7 @@ use std::{
     sync::Mutex,
 };
 
-use clap::{ArgGroup, Clap};
+use clap::{ArgGroup, Parser};
 use slog::{error, o, Drain, Logger};
 use wayland_compositor::{backend::Backend, run, state::Socket};
 
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Clap)]
+#[derive(Debug, Clone, Copy, Parser)]
 struct Args {
     #[clap(flatten)]
     backend: BackendSelection,
@@ -76,7 +76,7 @@ impl fmt::Display for StartError {
 
 impl Error for StartError {}
 
-#[derive(Debug, Clone, Copy, Clap)]
+#[derive(Debug, Clone, Copy, Parser)]
 #[clap(group = ArgGroup::new("backend").required(false).multiple(false))]
 struct BackendSelection {
     #[cfg_attr(
