@@ -1,54 +1,31 @@
 use std::{
     io,
     path::{Path, PathBuf},
-    thread::JoinHandle,
 };
 
 use slog::Logger;
-use smithay::reexports::calloop::{
-    channel::{self, sync_channel, Channel},
-    EventSource, Poll, PostAction, Readiness, Token, TokenFactory,
-};
+use smithay::reexports::calloop::{EventSource, Poll, PostAction, Readiness, Token, TokenFactory};
 
 use crate::config::imp::*;
 
 #[derive(Debug)]
 pub struct DirWatcher {
-    channel: Channel<Event>,
-    watch_thread: JoinHandle<()>,
-    logger: Logger,
+    inner: PlatformEventSource,
 }
 
 impl DirWatcher {
-    pub fn new(watching: &(impl AsRef<Path> + ?Sized), logger: Logger) -> io::Result<DirWatcher> {
-        let (channel, watch_thread) = start_watcher(watching.as_ref().to_owned(), logger.clone())?;
-
+    pub fn new(path: &(impl AsRef<Path> + ?Sized), logger: Logger) -> io::Result<DirWatcher> {
         Ok(DirWatcher {
-            channel,
-            watch_thread,
-            logger,
+            inner: PlatformEventSource::new(path, logger)?,
         })
-    }
-}
-
-impl Drop for DirWatcher {
-    fn drop(&mut self) {
-        {
-            // Signal the worker thread to exit by dropping the read end of the channel.
-            // There is no easy and nice way to do this, so do it the ugly way: Replace it.
-            let (_, channel) = sync_channel(1);
-            self.channel = channel;
-        }
-
-        // Unpark the thread to instantly shut down
-        self.watch_thread.thread().unpark();
     }
 }
 
 impl EventSource for DirWatcher {
     type Event = Event;
 
-    type Metadata = ();
+    /// The directory which is being watched for file changes.
+    type Metadata = PathBuf;
 
     type Ret = ();
 
@@ -56,28 +33,20 @@ impl EventSource for DirWatcher {
     where
         F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
     {
-        self.channel.process_events(readiness, token, |event, _| match event {
-            channel::Event::Msg(event) => {
-                if let Event::ThreadWakeup = event {
-                } else {
-                    callback(event, &mut ());
-                }
-            }
-
-            channel::Event::Closed => (),
-        })
+        self.inner
+            .process_events(readiness, token, |event, path| callback(event, path))
     }
 
     fn register(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
-        self.channel.register(poll, token_factory)
+        self.inner.register(poll, token_factory)
     }
 
     fn reregister(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
-        self.channel.reregister(poll, token_factory)
+        self.inner.reregister(poll, token_factory)
     }
 
     fn unregister(&mut self, poll: &mut Poll) -> io::Result<()> {
-        self.channel.unregister(poll)
+        self.inner.unregister(poll)
     }
 }
 
@@ -92,26 +61,36 @@ pub enum Event {
 
     /// The file has been removed.
     Removed(PathBuf),
-
-    /// The watch thread was waken up and will check for changes.
-    ///
-    /// This event is never exposed to users and is, only used internally.
-    #[doc(hidden)]
-    ThreadWakeup,
 }
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
+    use std::{
+        env,
+        fs::{self, File},
+        io,
+        time::Duration,
+    };
 
-    use directories::ProjectDirs;
     use slog::{Drain, Logger};
     use smithay::reexports::calloop::EventLoop;
 
     use super::DirWatcher;
 
     #[test]
-    fn test_watcher() {
+    fn test_watcher() -> io::Result<()> {
+        struct TestState {
+            created: bool,
+            modified: bool,
+            deleted: bool,
+        }
+
+        let mut state = TestState {
+            created: false,
+            modified: false,
+            deleted: false,
+        };
+
         // Initialize logger
         let logger = Logger::root(
             slog_async::Async::default(slog_term::term_full().fuse()).fuse(),
@@ -121,16 +100,62 @@ mod test {
         let _guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().expect("Could not setup log backend");
 
-        let mut event_loop = EventLoop::<()>::try_new().unwrap();
-        let project_dirs = ProjectDirs::from("", "i5", "wayland_compositor").unwrap();
-        let config_dir = project_dirs.config_dir();
+        let mut event_loop = EventLoop::<TestState>::try_new().unwrap();
+        let mut test_dir = env::temp_dir();
+        test_dir.push("test_watcher");
 
-        let watcher = DirWatcher::new(config_dir, logger).expect("Watcher not created");
+        // Clear the directory for testing if anything exists
+        let _ = fs::remove_dir_all(&test_dir);
+        fs::create_dir_all(&test_dir)?;
 
-        event_loop.handle().insert_source(watcher, |_event, _, _| {}).unwrap();
+        let watcher = DirWatcher::new(&test_dir, logger).expect("Watcher not created");
 
         event_loop
-            .run(Duration::from_millis(10), &mut (), |_| {})
-            .expect("Failed to run event loop")
+            .handle()
+            .insert_source(watcher, |event, _, state| match event {
+                crate::config::watcher::Event::Created(_) => {
+                    state.created = true;
+                }
+                crate::config::watcher::Event::Modified(_) => {
+                    state.modified = true;
+                }
+                crate::config::watcher::Event::Removed(_) => {
+                    state.deleted = true;
+                }
+            })
+            .unwrap();
+
+        // Dispatch once to set up.
+        event_loop.dispatch(Duration::from_millis(0), &mut state)?;
+
+        // Create a file
+        let mut test = test_dir.clone();
+        test.push("test.txt");
+        let _ = File::create(&test)?;
+
+        event_loop.dispatch(Duration::from_millis(0), &mut state)?;
+
+        assert_eq!(state.created, true, "File creation not detected");
+
+        // Write to the file
+        // {
+        //     let mut file = File::create(&test)?;
+        //     file.write_all(b"Test file contents")?;
+        //     file.flush()?;
+        // }
+
+        // event_loop.dispatch(Duration::from_millis(200), &mut state)?;
+
+        // assert_eq!(state.modified, true, "File modification not detected");
+
+        // Delete the file
+        fs::remove_file(test)?;
+
+        // Let's be extremely generous with the amount of time we allow platforms to respond in.
+        event_loop.dispatch(Duration::from_secs(10), &mut state)?;
+
+        assert_eq!(state.deleted, true, "Deletion not detected");
+
+        Ok(())
     }
 }

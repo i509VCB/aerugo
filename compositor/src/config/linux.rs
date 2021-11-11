@@ -1,114 +1,164 @@
 use std::{
     fs, io,
-    path::PathBuf,
-    thread::{self, JoinHandle},
-    time::Duration,
+    os::unix::prelude::AsRawFd,
+    path::{Path, PathBuf},
 };
 
-use inotify::{EventMask, Inotify, WatchMask};
-use slog::{debug, error, info, Logger};
-use smithay::reexports::calloop::{self, channel::Channel};
+use inotify::{EventMask, EventOwned, Inotify, WatchDescriptor, WatchMask};
+use slog::{info, Logger};
+use smithay::reexports::calloop::{EventSource, Interest, Mode, Poll, PostAction, Readiness, Token, TokenFactory};
 
 use super::watcher;
 
-pub fn start_watcher(watching: PathBuf, logger: Logger) -> io::Result<(Channel<watcher::Event>, JoinHandle<()>)> {
-    // Make sure the path to the directory we are watching exists.
-    fs::create_dir_all(&watching)?;
+#[derive(Debug)]
+pub struct InotifySource {
+    inotify: Inotify,
+    token: Token,
+    watch: WatchDescriptor,
+    path: PathBuf,
+    _logger: Logger,
+}
 
-    let (sender, channel) = calloop::channel::channel();
+impl InotifySource {
+    pub fn new<L>(path: &(impl AsRef<Path> + ?Sized), logger: L) -> io::Result<InotifySource>
+    where
+        L: Into<Option<slog::Logger>>,
+    {
+        let logger = logger.into().unwrap_or_else(|| Logger::root(slog::Discard, slog::o!()));
+        let path = path.as_ref().to_owned();
 
-    let mut inotify = Inotify::init()?;
-    let path = &watching.to_string_lossy().into_owned();
-    let watch = inotify.add_watch(
-        &watching,
-        WatchMask::CREATE | WatchMask::DELETE | WatchMask::MODIFY | WatchMask::MOVED_FROM | WatchMask::MOVED_TO,
-    )?;
+        // Make sure the path to the directory we are watching exists.
+        fs::create_dir_all(&path)?;
 
-    let logger = logger.new(slog::o!(
-        "watcher" => "inotify",
-        "path" => path.clone()
-    ));
+        let mut inotify = Inotify::init()?;
+        let watch = inotify.add_watch(&path, WatchMask::all())?;
 
-    info!(logger, "Initialized watcher");
+        let logger = logger.new(slog::o!(
+            "watcher" => "inotify",
+            "path" => path.display().to_string(),
+        ));
 
-    let watch_thread = thread::spawn(move || {
-        let logger = logger.clone();
-        let mut buffer = [0; 4096];
+        info!(logger, "Initialized watcher");
 
-        loop {
-            // Shutdown
-            if sender.send(watcher::Event::ThreadWakeup).is_err() {
-                break;
-            }
+        Ok(InotifySource {
+            inotify,
+            token: Token::invalid(),
+            watch,
+            path,
+            _logger: logger,
+        })
+    }
+}
 
-            let mut channel_closed = false;
+impl EventSource for InotifySource {
+    type Event = EventOwned;
 
-            match inotify.read_events(&mut buffer) {
-                Ok(events) => {
-                    for event in events {
-                        if event.wd == watch {
-                            channel_closed =
-                                if event.mask.contains(EventMask::CREATE) || event.mask.contains(EventMask::MOVED_TO) {
-                                    let mut path = watching.clone();
-                                    path.push(event.name.unwrap());
+    /// The directory which is being watched for file changes.
+    type Metadata = PathBuf;
 
-                                    debug!(
-                                        logger,
-                                        "Created dir entry";
-                                        "entry" => &path.file_name().unwrap().to_string_lossy().into_owned()
-                                    );
+    type Ret = ();
 
-                                    sender.send(watcher::Event::Created(path))
-                                } else if event.mask.contains(EventMask::DELETE)
-                                    || event.mask.contains(EventMask::MOVED_FROM)
-                                {
-                                    let mut path = watching.clone();
-                                    path.push(event.name.unwrap());
+    fn process_events<F>(&mut self, _readiness: Readiness, token: Token, mut callback: F) -> std::io::Result<PostAction>
+    where
+        F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
+    {
+        if token == self.token {
+            let mut buffer = [0; 1024];
 
-                                    debug!(
-                                        logger,
-                                        "Removed dir entry";
-                                        "entry" => &path.file_name().unwrap().to_string_lossy().into_owned()
-                                    );
+            slog::error!(self._logger, "Dispatch");
 
-                                    sender.send(watcher::Event::Removed(path))
-                                } else if event.mask.contains(EventMask::MODIFY) {
-                                    let mut path = watching.clone();
-                                    path.push(event.name.unwrap());
-
-                                    debug!(
-                                        logger,
-                                        "Entry modified";
-                                        "modified" => &path.file_name().unwrap().to_string_lossy().into_owned()
-                                    );
-
-                                    sender.send(watcher::Event::Modified(path))
-                                } else {
-                                    Ok(())
-                                }
-                                .is_err();
-                        }
-
-                        if channel_closed {
-                            break;
-                        }
-                    }
-                }
-
-                Err(err) => {
-                    error!(logger, "Error while reading events {}", err);
-                    break;
+            for event in self.inotify.read_events(&mut buffer)? {
+                if event.wd == self.watch {
+                    // Always clone the path so users can not modify it.
+                    callback(event.into_owned(), &mut self.path.clone());
                 }
             }
-
-            if channel_closed {
-                break;
-            }
-
-            // Park the test thread for a little time to not burn cpus
-            thread::park_timeout(Duration::from_secs(2));
         }
-    });
 
-    Ok((channel, watch_thread))
+        Ok(PostAction::Continue)
+    }
+
+    fn register(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
+        let token = token_factory.token();
+        poll.register(self.inotify.as_raw_fd(), Interest::READ, Mode::Level, token)?;
+        self.token = token;
+
+        Ok(())
+    }
+
+    fn reregister(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
+        let token = token_factory.token();
+        poll.reregister(self.inotify.as_raw_fd(), Interest::READ, Mode::Level, token)?;
+        self.token = token;
+
+        Ok(())
+    }
+
+    fn unregister(&mut self, poll: &mut Poll) -> io::Result<()> {
+        self.token = Token::invalid();
+        poll.unregister(self.inotify.as_raw_fd())
+    }
+}
+
+// Abstracted event source
+
+#[derive(Debug)]
+pub(crate) struct PlatformEventSource {
+    inner: InotifySource,
+}
+
+impl PlatformEventSource {
+    pub fn new<L>(path: &(impl AsRef<Path> + ?Sized), logger: L) -> io::Result<PlatformEventSource>
+    where
+        L: Into<Option<slog::Logger>>,
+    {
+        Ok(PlatformEventSource {
+            inner: InotifySource::new(path, logger)?,
+        })
+    }
+}
+
+impl EventSource for PlatformEventSource {
+    type Event = watcher::Event;
+
+    /// The directory which is being watched for file changes.
+    type Metadata = PathBuf;
+
+    type Ret = ();
+
+    fn process_events<F>(&mut self, readiness: Readiness, token: Token, mut callback: F) -> std::io::Result<PostAction>
+    where
+        F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
+    {
+        self.inner.process_events(readiness, token, |event, path| {
+            if event.mask.contains(EventMask::CREATE) || event.mask.contains(EventMask::MOVED_TO) {
+                let mut created = path.clone();
+                created.push(event.name.unwrap());
+
+                callback(watcher::Event::Created(created), path)
+            } else if event.mask.contains(EventMask::DELETE) || event.mask.contains(EventMask::MOVED_FROM) {
+                let mut removed = path.clone();
+                removed.push(event.name.unwrap());
+
+                callback(watcher::Event::Removed(removed), path)
+            } else if event.mask.contains(EventMask::MODIFY) {
+                let mut modified = path.clone();
+                modified.push(event.name.unwrap());
+
+                callback(watcher::Event::Modified(modified), path)
+            }
+        })
+    }
+
+    fn register(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
+        self.inner.register(poll, token_factory)
+    }
+
+    fn reregister(&mut self, poll: &mut Poll, token_factory: &mut TokenFactory) -> io::Result<()> {
+        self.inner.reregister(poll, token_factory)
+    }
+
+    fn unregister(&mut self, poll: &mut Poll) -> io::Result<()> {
+        self.inner.unregister(poll)
+    }
 }
