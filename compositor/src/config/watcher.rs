@@ -68,7 +68,7 @@ mod test {
     use std::{
         env,
         fs::{self, File},
-        io,
+        io::{self, Write},
         time::Duration,
     };
 
@@ -138,15 +138,15 @@ mod test {
         assert_eq!(state.created, true, "File creation not detected");
 
         // Write to the file
-        // {
-        //     let mut file = File::create(&test)?;
-        //     file.write_all(b"Test file contents")?;
-        //     file.flush()?;
-        // }
+        {
+            let mut file = File::create(&test)?;
+            file.write_all(b"Test file contents")?;
+            file.flush()?;
+        }
 
-        // event_loop.dispatch(Duration::from_millis(200), &mut state)?;
+        event_loop.dispatch(Duration::from_secs(10), &mut state)?;
 
-        // assert_eq!(state.modified, true, "File modification not detected");
+        assert_eq!(state.modified, true, "File modification not detected");
 
         // Delete the file
         fs::remove_file(test)?;

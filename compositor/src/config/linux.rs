@@ -63,7 +63,7 @@ impl EventSource for InotifySource {
         F: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
     {
         if token == self.token {
-            let mut buffer = [0; 1024];
+            let mut buffer = [0; 4096];
 
             slog::error!(self._logger, "Dispatch");
 
@@ -73,6 +73,8 @@ impl EventSource for InotifySource {
                     callback(event.into_owned(), &mut self.path.clone());
                 }
             }
+
+            assert_eq!(self.inotify.read_events(&mut buffer)?.count(), 0, "Not empty");
         }
 
         Ok(PostAction::Continue)
