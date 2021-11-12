@@ -1,7 +1,6 @@
 #![warn(missing_debug_implementations)]
 
 pub mod backend;
-mod config;
 pub mod shell;
 pub mod state;
 pub mod surface_data;

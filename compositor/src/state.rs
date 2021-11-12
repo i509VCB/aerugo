@@ -1,4 +1,3 @@
-use directories::ProjectDirs;
 use slog::{error, info, Logger};
 use smithay::{
     backend::input::{InputBackend, InputEvent},
@@ -10,7 +9,7 @@ use smithay::{
 };
 use std::{cell::RefCell, error::Error, rc::Rc, time::Duration};
 
-use crate::{backend::Backend, config::watcher::DirWatcher, shell::Shell, CreateBackendFn};
+use crate::{backend::Backend, shell::Shell, CreateBackendFn};
 
 #[derive(Debug)]
 pub enum Socket {
@@ -52,7 +51,6 @@ impl State {
             insert_wayland_source(loop_handle.clone(), display)?;
             // Initialize compositor globals
             setup_globals(display, logger.clone())?;
-            setup_dir_watcher(loop_handle.clone(), logger.clone())?;
 
             let backend = backend(logger.clone(), loop_handle.clone(), display)?;
 
@@ -187,20 +185,6 @@ fn insert_wayland_source(handle: LoopHandle<'static, State>, display: &Display) 
             }
         },
     )?;
-
-    Ok(())
-}
-
-fn setup_dir_watcher(handle: LoopHandle<'static, State>, logger: Logger) -> Result<(), Box<dyn Error>> {
-    let project_dirs = ProjectDirs::from("", "i5", "wayland_compositor").unwrap();
-
-    let config_dir = project_dirs.config_dir();
-
-    let watcher = DirWatcher::new(config_dir, logger)?;
-
-    handle.insert_source(watcher, |event, _, _state| {
-        println!("{:?}", event);
-    })?;
 
     Ok(())
 }
