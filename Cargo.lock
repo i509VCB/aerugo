@@ -24,6 +24,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6df5aef5c5830360ce5218cecb8f018af3438af5686ae945094affc86fdec63"
 
 [[package]]
+name = "ash"
+version = "0.33.3+1.2.191"
+source = "git+https://github.com/MaikKlein/ash#675f91e9cda30f4550a953e5b2ae0465662b679a"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -909,9 +914,11 @@ dependencies = [
 name = "wayland_compositor"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "clap",
  "directories",
  "downcast-rs",
+ "lazy_static",
  "nix 0.23.0",
  "slog",
  "slog-async",

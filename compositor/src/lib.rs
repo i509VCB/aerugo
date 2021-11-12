@@ -4,6 +4,7 @@ pub mod backend;
 pub mod shell;
 pub mod state;
 pub mod surface_data;
+mod vulkan;
 
 #[cfg(feature = "xwayland")]
 mod xwayland;

@@ -5,7 +5,7 @@ use smithay::{
         calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
         wayland_server::Display,
     },
-    wayland::{compositor::compositor_init, shm::init_shm_global},
+    wayland::{compositor::compositor_init, data_device, shm::init_shm_global},
 };
 use std::{cell::RefCell, error::Error, rc::Rc, time::Duration};
 
@@ -200,6 +200,8 @@ fn setup_globals(display: &mut Display, logger: Logger) -> Result<(), Box<dyn Er
         },
         logger.clone(),
     );
+
+    data_device::init_data_device(display, |_| {}, data_device::default_action_chooser, logger);
 
     Ok(())
 }
