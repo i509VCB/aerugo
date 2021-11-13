@@ -27,14 +27,20 @@
 //!
 //! [^validation]: [`VALIDATION_LAYER_NAME`]
 
+pub mod physical_device;
+
 use std::{
+    cmp::Ordering,
     error::Error,
     ffi::{CStr, CString, NulError},
     fmt::{self, Display, Formatter},
     sync::Arc,
 };
 
-use ash::{vk::InstanceCreateInfo, Entry};
+use ash::{
+    vk::{ApplicationInfo, InstanceCreateInfo},
+    Entry,
+};
 use lazy_static::lazy_static;
 
 /// The name of the validation layer.
@@ -45,6 +51,85 @@ use lazy_static::lazy_static;
 /// 1) Validation layers are not present on every system
 /// 2) Validation layers introduce some overhead.
 pub const VALIDATION_LAYER_NAME: &str = "VK_LAYER_KHRONOS_validation";
+
+/// A Vulkan API version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Version {
+    /// The variant of the Vulkan API.
+    ///
+    /// Generally this value will be `0` because the Vulkan specification uses variant `0`.
+    pub variant: u32,
+    /// The major version of the Vulkan API.
+    pub major: u32,
+    /// The minor version of the Vulkan API.
+    pub minor: u32,
+    /// The patch version of the Vulkan API.
+    ///
+    /// Most Vulkan API calls which take a version typically ignore the patch value. Consumers of the Vulkan API may
+    /// typically ignore the patch value.
+    pub patch: u32,
+}
+
+impl Version {
+    /// Version 1.0 of the Vulkan API.
+    pub const VERSION_1_0: Version = Version::from_raw(ash::vk::API_VERSION_1_0);
+
+    /// Version 1.1 of the Vulkan API.
+    pub const VERSION_1_1: Version = Version::from_raw(ash::vk::API_VERSION_1_1);
+
+    /// Version 1.2 of the Vulkan API.
+    pub const VERSION_1_2: Version = Version::from_raw(ash::vk::API_VERSION_1_2);
+
+    /// Converts a packed version into a version struct.
+    pub const fn from_raw(raw: u32) -> Version {
+        Version {
+            variant: ash::vk::api_version_variant(raw),
+            major: ash::vk::api_version_major(raw),
+            minor: ash::vk::api_version_minor(raw),
+            patch: ash::vk::api_version_patch(raw),
+        }
+    }
+
+    /// Converts a version struct into a packed version.
+    pub const fn to_raw(self) -> u32 {
+        ash::vk::make_api_version(self.variant, self.major, self.minor, self.patch)
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match self.variant.partial_cmp(&other.variant) {
+            Some(Ordering::Equal) => {}
+            ord => return ord,
+        }
+
+        match self.major.partial_cmp(&other.major) {
+            Some(Ordering::Equal) => {}
+            ord => return ord,
+        }
+
+        match self.minor.partial_cmp(&other.minor) {
+            Some(Ordering::Equal) => {}
+            ord => return ord,
+        }
+
+        self.patch.partial_cmp(&other.patch)
+    }
+}
+
+/// Returns the max Vulkan API version supported any created instances.
+pub fn max_instance_version() -> Result<Version, InstanceError> {
+    Ok(LIBRARY
+        .try_enumerate_instance_version()?
+        .map(Version::from_raw)
+        // Vulkan 1.0 does not have `vkEnumerateInstanceVersion`.
+        .unwrap_or(Version {
+            variant: 0,
+            major: 1,
+            minor: 0,
+            patch: 0,
+        }))
+}
 
 /// Enumerates over the available instance layers on the system.
 pub fn enumerate_layers() -> Result<impl Iterator<Item = String>, InstanceError> {
@@ -70,18 +155,26 @@ pub fn enumerate_extensions() -> Result<impl Iterator<Item = String>, InstanceEr
         }))
 }
 
+/// An error that may occur when using or creating an instance.
 #[derive(Debug)]
 pub enum InstanceError {
+    /// The driver does not support the requested Vulkan API version.
+    IncompatibleDriver,
+
+    /// The host or device has run out of memory.
     OutOfMemory,
 
+    /// Some requested extensions of layers are not available.
     MissingExtensionsOrLayers(MissingExtensionsOrLayers),
 
+    /// Some other error occurred.
     Other(ash::vk::Result),
 }
 
 impl From<ash::vk::Result> for InstanceError {
     fn from(err: ash::vk::Result) -> Self {
         match err {
+            ash::vk::Result::ERROR_INCOMPATIBLE_DRIVER => InstanceError::IncompatibleDriver,
             ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY => InstanceError::OutOfMemory,
             ash::vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => InstanceError::OutOfMemory,
             err => InstanceError::Other(err),
@@ -147,11 +240,22 @@ impl From<MissingExtensionsOrLayers> for InstanceError {
 /// To instantiate, use [`Instance::builder`].
 #[derive(Debug)]
 pub struct InstanceBuilder {
+    api_version: Version,
     enable_extensions: Vec<String>,
     enable_layers: Vec<String>,
 }
 
 impl InstanceBuilder {
+    /// Sets the API version that should be used when creating an instance.
+    ///
+    /// The default value is [`Version::VERSION_1_0`].
+    ///
+    /// You should ensure the version you are requesting is supported using [`max_instance_version`].
+    pub fn api_version(mut self, version: Version) -> InstanceBuilder {
+        self.api_version = version;
+        self
+    }
+
     /// Adds an instance extension to be requested when creating an [`Instance`].
     ///
     /// The extension must be supported by the Vulkan runtime or else building the instance will fail. A great way to
@@ -221,13 +325,20 @@ impl InstanceBuilder {
         let extensions_ptr = extensions.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
         let layers_ptr = layers.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
 
+        let app_info = ApplicationInfo::builder()
+            .api_version(self.api_version.to_raw())
+        //    .application_name(application_name) // TODO
+        //    .application_version(application_version) // TODO
+            .engine_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"Smithay\0") }) // TODO
+        //    .engine_version(engine_version) // TODO
+        ;
+
         let create_info = InstanceCreateInfo::builder()
-            // TODO: app info
+            .application_info(&app_info)
             .enabled_extension_names(&extensions_ptr[..])
             .enabled_layer_names(&layers_ptr[..]);
 
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }?;
-
         let instance = Arc::new(InstanceInner { instance });
 
         Ok(instance.into())
@@ -243,6 +354,7 @@ impl Instance {
     /// Returns a builder that may be used to create an instance
     pub fn builder() -> InstanceBuilder {
         InstanceBuilder {
+            api_version: Version::VERSION_1_0,
             enable_extensions: vec![],
             enable_layers: vec![],
         }
