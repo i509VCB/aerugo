@@ -5,6 +5,8 @@ use std::ffi::CStr;
 
 use super::{Instance, InstanceError, Version};
 
+/// A physical device provided by a Vulkan instance.
+#[derive(Debug)]
 pub struct PhysicalDevice<'i> {
     instance: &'i Instance,
     inner: ash::vk::PhysicalDevice,

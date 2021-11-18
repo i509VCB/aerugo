@@ -21,13 +21,14 @@
 //! enable validation layers through either your environment variables (setting the value of `VK_INSTANCE_LAYERS`) or
 //! pass the name of the validation layer[^validation] into the list of layers to be enabled.
 //!
-//! After creating an instance, the next step is to enumerate the physical devices available to the instance. On most
-//! systems there may only be one suitable device that is available. On systems with multiple graphics cards, the
-//! properties of each device and the supported extensions may be queried to select the preferred device.
+//! After creating an instance, the next step is to enumerate the physical devices available to the instance using
+//! [`PhysicalDevice::enumerate`]. On most systems there may only be one suitable
+//! device that is available. On systems with multiple graphics cards, the properties of each device and the supported
+//! extensions may be queried to select the preferred device.
 //!
 //! [^validation]: [`VALIDATION_LAYER_NAME`]
 
-pub mod physical_device;
+mod physical_device;
 
 use std::{
     cmp::Ordering,
@@ -43,13 +44,15 @@ use ash::{
 };
 use lazy_static::lazy_static;
 
+pub use self::physical_device::PhysicalDevice;
+
 /// The name of the validation layer.
 ///
 /// This may be passed into [`InstanceBuilder::layer`] to enable validation layers.
 ///
 /// This extension should not be used in production for the following reasons:
-/// 1) Validation layers are not present on every system
-/// 2) Validation layers introduce some overhead.
+/// 1) Validation layers are not present on most systems
+/// 2) Validation layers introduce overhead for production use
 pub const VALIDATION_LAYER_NAME: &str = "VK_LAYER_KHRONOS_validation";
 
 /// A Vulkan API version.
@@ -93,6 +96,16 @@ impl Version {
     /// Converts a version struct into a packed version.
     pub const fn to_raw(self) -> u32 {
         ash::vk::make_api_version(self.variant, self.major, self.minor, self.patch)
+    }
+
+    /// Returns an object which implements [`Display`] that may be used to display a version.
+    ///
+    /// The `display_variant` parameter states whether the [`Version::variant`] should be displayed.
+    pub fn display(&self, display_variant: bool) -> impl Display + '_ {
+        VersionDisplayer {
+            version: self,
+            variant: display_variant,
+        }
     }
 }
 
@@ -181,6 +194,19 @@ impl From<ash::vk::Result> for InstanceError {
         }
     }
 }
+
+impl Display for InstanceError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            InstanceError::IncompatibleDriver => write!(f, "incompatible driver"),
+            InstanceError::OutOfMemory => write!(f, "out of memory"),
+            InstanceError::MissingExtensionsOrLayers(missing) => missing.fmt(f),
+            InstanceError::Other(err) => err.fmt(f),
+        }
+    }
+}
+
+impl Error for InstanceError {}
 
 /// Some requested extensions and or layers were not available when creating an instance.
 #[derive(Debug)]
@@ -339,12 +365,16 @@ impl InstanceBuilder {
             .enabled_layer_names(&layers_ptr[..]);
 
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }?;
-        let instance = Arc::new(InstanceInner { instance });
+        let instance = Arc::new(InstanceInner {
+            instance,
+            version: self.api_version,
+        });
 
         Ok(instance.into())
     }
 }
 
+/// A Vulkan instance which allows interfacing with the Vulkan APIs.
 #[derive(Debug)]
 pub struct Instance {
     inner: Arc<InstanceInner>,
@@ -358,6 +388,11 @@ impl Instance {
             enable_extensions: vec![],
             enable_layers: vec![],
         }
+    }
+
+    /// Returns the version of the API the instance has been created with.
+    pub fn version(&self) -> Version {
+        self.inner.version
     }
 
     /// Returns a raw handle to the underlying [`ash::Instance`].
@@ -376,6 +411,7 @@ impl Instance {
 
 pub(crate) struct InstanceInner {
     instance: ash::Instance,
+    version: Version,
 }
 
 impl fmt::Debug for InstanceInner {
@@ -397,25 +433,66 @@ impl Drop for InstanceInner {
     }
 }
 
+#[derive(Debug)]
+struct VersionDisplayer<'a> {
+    version: &'a Version,
+    variant: bool,
+}
+
+impl Display for VersionDisplayer<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}",
+            self.version.major, self.version.minor, self.version.patch
+        )?;
+
+        if self.variant {
+            write!(f, " variant {}", self.version.variant)?;
+        }
+
+        Ok(())
+    }
+}
+
 lazy_static! {
     static ref LIBRARY: Entry = Entry::new();
 }
 
 // TODO: Need to set up lavapipe on CI for testing some of the basic things.
-// #[cfg(test)]
-// mod test {
-//     use super::{Instance, VALIDATION_LAYER_NAME};
+#[cfg(test)]
+mod test {
+    use std::error::Error;
 
-//     #[test]
-//     fn instance() {
-//         let _instance = Instance::builder().build().expect("Failed to create instance");
-//     }
+    use super::{physical_device::PhysicalDevice, Instance, VALIDATION_LAYER_NAME};
 
-//     #[test]
-//     fn instance_with_layer() {
-//         let _instance = Instance::builder()
-//             .layer(VALIDATION_LAYER_NAME)
-//             .build()
-//             .expect("Failed to create instance");
-//     }
-// }
+    #[test]
+    fn instance() {
+        let _instance = Instance::builder().build().expect("Failed to create instance");
+    }
+
+    #[test]
+    fn instance_with_layer() -> Result<(), Box<dyn Error>> {
+        let instance = Instance::builder()
+            .layer(VALIDATION_LAYER_NAME)
+            .build()
+            .expect("Failed to create instance");
+
+        let physical = PhysicalDevice::enumerate(&instance)?
+            .filter(|d| {
+                d.supported_extensions()
+                    .iter()
+                    .any(|ext| ext == "VK_EXT_physical_device_drm")
+            })
+            .next()
+            .expect("No device supports physical device drm");
+
+        println!(
+            "{} supporting version: {}",
+            physical.name(),
+            physical.version().display(true)
+        );
+
+        Ok(())
+    }
+}
