@@ -46,6 +46,13 @@ use lazy_static::lazy_static;
 
 pub use self::physical_device::PhysicalDevice;
 
+const SMITHAY_VERSION: Version = Version {
+    variant: 0,
+    major: 0,
+    minor: 3,
+    patch: 0,
+};
+
 /// The name of the validation layer.
 ///
 /// This may be passed into [`InstanceBuilder::layer`] to enable validation layers.
@@ -269,6 +276,8 @@ pub struct InstanceBuilder {
     api_version: Version,
     enable_extensions: Vec<String>,
     enable_layers: Vec<String>,
+    app_name: Option<String>,
+    app_version: Option<Version>,
 }
 
 impl InstanceBuilder {
@@ -295,10 +304,21 @@ impl InstanceBuilder {
     /// Adds an instance layer to be requested when creating an [`Instance`].
     ///
     /// The layer must be supported by the Vulkan runtime or else building the instance will fail. A great way to
-    /// ensure the layer you are requesting is supported is to check if your extension is listed in
-    /// [`enumerate_layers`].
+    /// ensure the layer you are requesting is supported is to check if your layer is listed in [`enumerate_layers`].
     pub fn layer(mut self, layer: impl Into<String>) -> InstanceBuilder {
         self.enable_layers.push(layer.into());
+        self
+    }
+
+    /// Sets the app name that will be used by the driver when creating an instance.
+    pub fn app_name(mut self, name: impl Into<String>) -> InstanceBuilder {
+        self.app_name = Some(name.into());
+        self
+    }
+
+    /// Sets the app version that will be used by the driver when creating an instance.
+    pub fn app_version(mut self, version: Version) -> InstanceBuilder {
+        self.app_version = Some(version);
         self
     }
 
@@ -351,13 +371,22 @@ impl InstanceBuilder {
         let extensions_ptr = extensions.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
         let layers_ptr = layers.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
 
-        let app_info = ApplicationInfo::builder()
+        let mut app_info = ApplicationInfo::builder()
             .api_version(self.api_version.to_raw())
-        //    .application_name(application_name) // TODO
-        //    .application_version(application_version) // TODO
-            .engine_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"Smithay\0") }) // TODO
-        //    .engine_version(engine_version) // TODO
-        ;
+            .engine_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"Smithay\0") })
+            .engine_version(SMITHAY_VERSION.to_raw());
+
+        if let Some(app_version) = self.app_version {
+            app_info = app_info.application_version(app_version.to_raw());
+        }
+
+        let app_name = self
+            .app_name
+            .map(|name| CString::new(name).expect("app name contains null terminator"))
+            // Yes this is ugly and probably wrong...
+            .unwrap_or_else(|| CString::new("").unwrap());
+
+        app_info = app_info.application_name(&app_name);
 
         let create_info = InstanceCreateInfo::builder()
             .application_info(&app_info)
@@ -387,6 +416,8 @@ impl Instance {
             api_version: Version::VERSION_1_0,
             enable_extensions: vec![],
             enable_layers: vec![],
+            app_name: None,
+            app_version: None,
         }
     }
 
