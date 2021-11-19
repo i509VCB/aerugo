@@ -3,6 +3,9 @@
 
 use std::ffi::CStr;
 
+use ash::extensions::ext::PhysicalDeviceDrm;
+use smithay::backend::drm::{DrmNode, NodeType};
+
 use super::{Instance, InstanceError, Version};
 
 /// A physical device provided by a Vulkan instance.
@@ -59,6 +62,50 @@ impl PhysicalDevice<'_> {
             .into_iter())
     }
 
+    // TODO: Add DRM feature attribute in smithay
+
+    /// Enumerates over the available physical devices provided by the instance, selecting the device which corresponds
+    /// to the DRM node.
+    ///
+    /// This function will only find the desired device if the device supports the [VK_EXT_physical_device_drm]
+    /// extension.
+    ///
+    /// [VK_EXT_physical_device_drm]: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkPhysicalDeviceDrmPropertiesEXT.html
+    pub fn with_drm_node(
+        instance: &Instance,
+        node: impl AsRef<DrmNode>,
+    ) -> Result<Option<PhysicalDevice<'_>>, InstanceError> {
+        Ok(PhysicalDevice::enumerate(instance)?
+            .filter(|device| {
+                let handle = unsafe { device.handle() };
+
+                // Does the device support VK_EXT_physical_device_drm
+                if device.supports_extension("VK_EXT_physical_device_drm") {
+                    let node = node.as_ref();
+
+                    // SAFETY: Physical device declares support for VK_EXT_physical_device_drm
+                    let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle(), handle) };
+
+                    match node.ty() {
+                        NodeType::Primary if drm_properties.has_primary == ash::vk::TRUE => {
+                            drm_properties.primary_major as u64 == node.major()
+                                && drm_properties.primary_minor as u64 == node.minor()
+                        }
+
+                        NodeType::Render if drm_properties.has_render == ash::vk::TRUE => {
+                            drm_properties.render_major as u64 == node.major()
+                                && drm_properties.render_minor as u64 == node.minor()
+                        }
+
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            })
+            .next())
+    }
+
     /// Returns the instance the physical device belongs to.
     pub fn instance(&self) -> &Instance {
         self.instance
@@ -77,6 +124,11 @@ impl PhysicalDevice<'_> {
     /// Returns a list of extensions this device supports.
     pub fn supported_extensions(&self) -> Vec<String> {
         self.extensions.clone()
+    }
+
+    /// Returns true if the device supports the specified extension.
+    pub fn supports_extension(&self, extension: &str) -> bool {
+        self.extensions.iter().any(|supported| supported == extension)
     }
 
     /// Returns some properties about the physical device.
