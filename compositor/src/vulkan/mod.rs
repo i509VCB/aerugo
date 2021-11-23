@@ -28,7 +28,9 @@
 //!
 //! [^validation]: [`VALIDATION_LAYER_NAME`]
 
+mod device;
 mod physical_device;
+mod queue;
 
 use std::{
     cmp::Ordering,
@@ -44,7 +46,9 @@ use ash::{
 };
 use lazy_static::lazy_static;
 
+pub use self::device::Device;
 pub use self::physical_device::PhysicalDevice;
+pub use self::queue::QueueFamily;
 
 const SMITHAY_VERSION: Version = Version {
     variant: 0,

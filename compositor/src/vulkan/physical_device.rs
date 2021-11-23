@@ -6,7 +6,7 @@ use std::ffi::CStr;
 use ash::extensions::ext::PhysicalDeviceDrm;
 use smithay::backend::drm::{DrmNode, NodeType};
 
-use super::{Instance, InstanceError, Version};
+use super::{queue::QueueFamily, Instance, InstanceError, Version};
 
 /// A physical device provided by a Vulkan instance.
 #[derive(Debug)]
@@ -18,6 +18,7 @@ pub struct PhysicalDevice<'i> {
     properties: ash::vk::PhysicalDeviceProperties,
     features: ash::vk::PhysicalDeviceFeatures,
     extensions: Vec<String>,
+    queue_families: Vec<QueueFamily>,
 }
 
 impl PhysicalDevice<'_> {
@@ -48,6 +49,15 @@ impl PhysicalDevice<'_> {
                     .expect("Invalid UTF-8 in Vulkan extension name")
                     .to_owned();
 
+                let queue_families = unsafe { instance_handle.get_physical_device_queue_family_properties(device) }
+                    .iter()
+                    .enumerate()
+                    .map(|(index, properties)| QueueFamily {
+                        inner: *properties,
+                        index,
+                    })
+                    .collect::<Vec<_>>();
+
                 Ok(PhysicalDevice {
                     instance,
                     inner: device,
@@ -56,6 +66,7 @@ impl PhysicalDevice<'_> {
                     properties,
                     features,
                     extensions,
+                    queue_families,
                 })
             })
             .collect::<Result<Vec<_>, InstanceError>>()?
@@ -75,35 +86,33 @@ impl PhysicalDevice<'_> {
         instance: &Instance,
         node: impl AsRef<DrmNode>,
     ) -> Result<Option<PhysicalDevice<'_>>, InstanceError> {
-        Ok(PhysicalDevice::enumerate(instance)?
-            .filter(|device| {
-                let handle = unsafe { device.handle() };
+        Ok(PhysicalDevice::enumerate(instance)?.find(|device| {
+            let handle = unsafe { device.handle() };
 
-                // Does the device support VK_EXT_physical_device_drm
-                if device.supports_extension("VK_EXT_physical_device_drm") {
-                    let node = node.as_ref();
+            // Does the device support VK_EXT_physical_device_drm
+            if device.supports_extension("VK_EXT_physical_device_drm") {
+                let node = node.as_ref();
 
-                    // SAFETY: Physical device declares support for VK_EXT_physical_device_drm
-                    let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle(), handle) };
+                // SAFETY: Physical device declares support for VK_EXT_physical_device_drm
+                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle(), handle) };
 
-                    match node.ty() {
-                        NodeType::Primary if drm_properties.has_primary == ash::vk::TRUE => {
-                            drm_properties.primary_major as u64 == node.major()
-                                && drm_properties.primary_minor as u64 == node.minor()
-                        }
-
-                        NodeType::Render if drm_properties.has_render == ash::vk::TRUE => {
-                            drm_properties.render_major as u64 == node.major()
-                                && drm_properties.render_minor as u64 == node.minor()
-                        }
-
-                        _ => false,
+                match node.ty() {
+                    NodeType::Primary if drm_properties.has_primary == ash::vk::TRUE => {
+                        drm_properties.primary_major as u64 == node.major()
+                            && drm_properties.primary_minor as u64 == node.minor()
                     }
-                } else {
-                    false
+
+                    NodeType::Render if drm_properties.has_render == ash::vk::TRUE => {
+                        drm_properties.render_major as u64 == node.major()
+                            && drm_properties.render_minor as u64 == node.minor()
+                    }
+
+                    _ => false,
                 }
-            })
-            .next())
+            } else {
+                false
+            }
+        }))
     }
 
     /// Returns the instance the physical device belongs to.
@@ -141,6 +150,11 @@ impl PhysicalDevice<'_> {
     /// Checking if any additional features are supported may be done using [`ash::vk::PhysicalDeviceFeatures2`].  
     pub fn features(&self) -> ash::vk::PhysicalDeviceFeatures {
         self.features
+    }
+
+    /// Returns an iterator over the queue families of the device.
+    pub fn queue_families(&self) -> impl Iterator<Item = &QueueFamily> {
+        self.queue_families.iter()
     }
 
     /// Returns a raw handle to the underlying [`ash::vk::PhysicalDevice`].
