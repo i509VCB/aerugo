@@ -35,16 +35,18 @@ mod queue;
 use std::{
     cmp::Ordering,
     error::Error,
-    ffi::{CStr, CString, NulError},
+    ffi::{c_void, CStr, CString, NulError},
     fmt::{self, Display, Formatter},
+    mem,
     sync::Arc,
 };
 
 use ash::{
-    vk::{ApplicationInfo, InstanceCreateInfo},
+    vk::{ApplicationInfo, DebugUtilsMessengerCreateInfoEXT, InstanceCreateInfo},
     Entry,
 };
 use lazy_static::lazy_static;
+use slog::Logger;
 
 pub use self::device::Device;
 pub use self::physical_device::PhysicalDevice;
@@ -327,35 +329,37 @@ impl InstanceBuilder {
     }
 
     /// Creates an instance using this builder.
-    pub fn build(self) -> Result<Instance, InstanceError> {
+    pub fn build(self, logger: Logger) -> Result<Instance, InstanceError> {
         // Check if the requested extensions and layers are supported.
-        {
-            let supported_layers = enumerate_layers()?.collect::<Vec<_>>();
-            let supported_extensions = enumerate_extensions()?.collect::<Vec<_>>();
+        let supported_layers = enumerate_layers()?.collect::<Vec<_>>();
+        let supported_extensions = enumerate_extensions()?.collect::<Vec<_>>();
 
-            let missing_extensions = self
-                .enable_extensions
-                .iter()
-                // Filter out entries that are present.
-                .filter(|s| !supported_extensions.contains(s))
-                .cloned()
-                .collect::<Vec<_>>();
+        let enable_debug_messenger = supported_layers
+            .iter()
+            .any(|layer_name| layer_name == VALIDATION_LAYER_NAME);
 
-            let missing_layers = self
-                .enable_layers
-                .iter()
-                // Filter out entries that are present.
-                .filter(|s| !supported_layers.contains(s))
-                .cloned()
-                .collect::<Vec<_>>();
+        let missing_extensions = self
+            .enable_extensions
+            .iter()
+            // Filter out entries that are present.
+            .filter(|s| !supported_extensions.contains(s))
+            .cloned()
+            .collect::<Vec<_>>();
 
-            if !missing_extensions.is_empty() || !missing_layers.is_empty() {
-                return Err(MissingExtensionsOrLayers {
-                    missing_extensions,
-                    missing_layers,
-                }
-                .into());
+        let missing_layers = self
+            .enable_layers
+            .iter()
+            // Filter out entries that are present.
+            .filter(|s| !supported_layers.contains(s))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !missing_extensions.is_empty() || !missing_layers.is_empty() {
+            return Err(MissingExtensionsOrLayers {
+                missing_extensions,
+                missing_layers,
             }
+            .into());
         }
 
         let extensions = self
@@ -392,15 +396,38 @@ impl InstanceBuilder {
 
         app_info = app_info.application_name(&app_name);
 
-        let create_info = InstanceCreateInfo::builder()
+        let mut create_info = InstanceCreateInfo::builder()
             .application_info(&app_info)
             .enabled_extension_names(&extensions_ptr[..])
             .enabled_layer_names(&layers_ptr[..]);
+
+        let messenger_logger = Box::into_raw(Box::new(logger));
+
+        let mut debug_messenger = DebugUtilsMessengerCreateInfoEXT::builder()
+            .message_severity(
+                ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+            )
+            .message_type(
+                ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+            )
+            // Box up the log and pass it as user data to obtain in the callback.
+            .user_data(messenger_logger as *mut _)
+            .pfn_user_callback(Some(vulkan_debug_utils_callback));
+
+        if enable_debug_messenger {
+            create_info = create_info.push_next(&mut debug_messenger);
+        }
 
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }?;
         let instance = Arc::new(InstanceInner {
             instance,
             version: self.api_version,
+            messenger_logger: messenger_logger as *mut _,
         });
 
         Ok(instance.into())
@@ -409,7 +436,7 @@ impl InstanceBuilder {
 
 /// A Vulkan instance which allows interfacing with the Vulkan APIs.
 #[derive(Debug)]
-pub struct Instance(Arc<InstanceInner>);
+pub struct Instance(pub(crate) Arc<InstanceInner>);
 
 impl Instance {
     /// Returns a builder that may be used to create an instance
@@ -445,6 +472,7 @@ impl Instance {
 pub(crate) struct InstanceInner {
     instance: ash::Instance,
     version: Version,
+    messenger_logger: *mut c_void,
 }
 
 impl fmt::Debug for InstanceInner {
@@ -463,6 +491,8 @@ impl Drop for InstanceInner {
     fn drop(&mut self) {
         // SAFETY: Wrapping the inner instance in `Arc` ensures external synchronization per Vulkan specification.
         unsafe { self.instance.destroy_instance(None) };
+        // SAFETY: Drop the logger we turn into a raw pointer that is passed as user data to the debug messenger.
+        unsafe { Box::<Logger>::from_raw(self.messenger_logger as *mut _) };
     }
 }
 
@@ -492,23 +522,51 @@ lazy_static! {
     static ref LIBRARY: Entry = Entry::new();
 }
 
+unsafe extern "system" fn vulkan_debug_utils_callback(
+    severity: ash::vk::DebugUtilsMessageSeverityFlagsEXT,
+    ty: ash::vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const ash::vk::DebugUtilsMessengerCallbackDataEXT,
+    user_data: *mut std::ffi::c_void,
+) -> ash::vk::Bool32 {
+    // The user data contains our logger always.
+    let logger = Box::<Logger>::from_raw(user_data as *mut _);
+
+    let message = CStr::from_ptr((*p_callback_data).p_message).to_string_lossy();
+
+    slog::info!(logger, "{}", message;
+        "type" => format!("{:?}", ty), "severity" => format!("{:?}", severity)
+    );
+
+    // Immediately drop the logger.
+    mem::forget(logger);
+
+    // Per the Vulkan specification, applications must ALWAYS return false.
+    ash::vk::FALSE
+}
+
 // TODO: Need to set up lavapipe on CI for testing some of the basic things.
 #[cfg(test)]
 mod test {
     use std::error::Error;
 
+    use slog::Logger;
+
+    use crate::vulkan::Device;
+
     use super::{physical_device::PhysicalDevice, Instance, VALIDATION_LAYER_NAME};
 
     #[test]
     fn instance() {
-        let _instance = Instance::builder().build().expect("Failed to create instance");
+        let _instance = Instance::builder()
+            .build(Logger::root(slog::Discard, slog::o!()))
+            .expect("Failed to create instance");
     }
 
     #[test]
     fn instance_with_layer() -> Result<(), Box<dyn Error>> {
         let instance = Instance::builder()
             .layer(VALIDATION_LAYER_NAME)
-            .build()
+            .build(Logger::root(slog::Discard, slog::o!()))
             .expect("Failed to create instance");
 
         let physical = PhysicalDevice::enumerate(&instance)?
@@ -532,6 +590,10 @@ mod test {
             println!("\tflags: {:?}", family.flags());
             println!("}}");
         }
+
+        let _device = Device::builder(&physical)
+            .create_queue(&physical.queue_families().next().unwrap())
+            .build()?;
 
         Ok(())
     }
