@@ -153,8 +153,8 @@ impl PhysicalDevice<'_> {
     }
 
     /// Returns an iterator over the queue families of the device.
-    pub fn queue_families(&self) -> impl Iterator<Item = &QueueFamily> {
-        self.queue_families.iter()
+    pub fn queue_families(&self) -> impl Iterator<Item = QueueFamily> + '_ {
+        self.queue_families.iter().copied()
     }
 
     /// Returns a raw handle to the underlying [`ash::vk::PhysicalDevice`].

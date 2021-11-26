@@ -9,28 +9,26 @@ use super::{InstanceInner, Version};
 
 /// Represents a handle to an instantiated logical device.
 #[derive(Debug)]
-pub struct Device {
-    inner: Arc<DeviceInner>,
-}
+pub struct Device(Arc<DeviceInner>);
 
 impl Device {
     /// Returns the version of the API the device has been created with.
     pub fn version(&self) -> Version {
-        self.inner.version
+        self.0.version
     }
 
     /// Returns a list of enabled extensions the device was created with.
     ///
     /// Some parts of the Vulkan API may only be used if the corresponding extension is enabled on the device.
     pub fn enabled_extensions(&self) -> Vec<String> {
-        self.inner.enabled_extensions.clone()
+        self.0.enabled_extensions.clone()
     }
 
     /// Returns true if one if the specified extension is enabled on the device.
     ///
     /// Some parts of the Vulkan API may only be used if the corresponding extension is enabled on the device.
     pub fn is_extension_enabled(&self, extension: &str) -> bool {
-        self.inner.enabled_extensions.iter().any(|name| name == extension)
+        self.0.enabled_extensions.iter().any(|name| name == extension)
     }
 
     /// Returns a raw handle to the underlying [`ash::Device`].
@@ -43,7 +41,7 @@ impl Device {
     /// - The caller must guarantee usage of the handle and any objects created using the device do not exceed the
     /// lifetime of the device.
     pub unsafe fn handle(&self) -> ash::Device {
-        self.inner.device.clone()
+        self.0.device.clone()
     }
 }
 

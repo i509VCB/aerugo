@@ -409,9 +409,7 @@ impl InstanceBuilder {
 
 /// A Vulkan instance which allows interfacing with the Vulkan APIs.
 #[derive(Debug)]
-pub struct Instance {
-    inner: Arc<InstanceInner>,
-}
+pub struct Instance(Arc<InstanceInner>);
 
 impl Instance {
     /// Returns a builder that may be used to create an instance
@@ -427,7 +425,7 @@ impl Instance {
 
     /// Returns the version of the API the instance has been created with.
     pub fn version(&self) -> Version {
-        self.inner.version
+        self.0.version
     }
 
     /// Returns a raw handle to the underlying [`ash::Instance`].
@@ -440,7 +438,7 @@ impl Instance {
     /// - The caller must guarantee usage of the handle and any objects created using the instance do not exceed the
     /// lifetime this instance.
     pub unsafe fn handle(&self) -> ash::Instance {
-        self.inner.instance.clone()
+        self.0.instance.clone()
     }
 }
 
@@ -457,7 +455,7 @@ impl fmt::Debug for InstanceInner {
 
 impl From<Arc<InstanceInner>> for Instance {
     fn from(inner: Arc<InstanceInner>) -> Self {
-        Instance { inner }
+        Instance(inner)
     }
 }
 
@@ -527,6 +525,13 @@ mod test {
             physical.name(),
             physical.version().display(true)
         );
+
+        for (index, family) in physical.queue_families().enumerate() {
+            println!("Queue Family {} {{", index);
+            println!("\tcount: {}", family.queue_count());
+            println!("\tflags: {:?}", family.flags());
+            println!("}}");
+        }
 
         Ok(())
     }

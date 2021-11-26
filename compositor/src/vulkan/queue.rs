@@ -1,7 +1,7 @@
 /// A family of queues on a device.
 ///
 /// Each family of queues has a varying number of queues and capabilities.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct QueueFamily {
     pub(crate) inner: ash::vk::QueueFamilyProperties,
     pub(crate) index: usize,
