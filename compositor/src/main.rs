@@ -47,7 +47,9 @@ struct Args {
     #[clap(flatten)]
     backend: BackendSelection,
 
-    /// Whether the compositor should use the slower mutex logger over the async logger.
+    /// Use the slower mutex logger over the async logger.
+    ///
+    /// This is useful for debugging.
     #[clap(long)]
     debug_logger: bool,
 }

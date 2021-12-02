@@ -32,4 +32,8 @@ impl Backend for WaylandBackend {
     fn logger(&self) -> &Logger {
         todo!()
     }
+
+    fn setup_outputs(&mut self, _display: &mut Display) {
+        todo!()
+    }
 }

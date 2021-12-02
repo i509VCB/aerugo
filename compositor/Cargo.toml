@@ -23,7 +23,10 @@ lazy_static = "1.4.0"
 git = "https://github.com/Smithay/smithay"
 default-features = false
 features = [
-    "slog-stdlog",
+    # Renderer
+    "renderer_gl",
+
+    # Standard features
     "use_system_lib",
     "wayland_frontend",
 ]
@@ -38,6 +41,7 @@ nix = { version = "0.23.0" }
 # - Enable wayland backend when implemented.
 # - XWayland
 default = [
+    ## Backends
     "x11_backend",
     #"wayland_backend",
     "udev_backend"
@@ -51,6 +55,10 @@ wayland_backend = []
 
 # Udev tty backend
 udev_backend = [ "smithay/backend_session" ]
+
+logind = ["smithay/backend_session_logind"]
+elogind = ["smithay/backend_session_elogind"]
+libseat = ["smithay/backend_session_libseat"]
 
 # XWayland
 xwayland = [ "smithay/xwayland", "smithay/x11rb_event_source" ]

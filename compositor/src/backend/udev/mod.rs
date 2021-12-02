@@ -2,7 +2,7 @@ use std::error::Error;
 
 use slog::Logger;
 use smithay::{
-    backend::session::auto::AutoSession,
+    backend::session::auto::{AutoSession, AutoSessionNotifier},
     reexports::{calloop::LoopHandle, wayland_server::Display},
 };
 
@@ -11,14 +11,22 @@ use crate::state::NameMe;
 use super::Backend;
 
 #[derive(Debug)]
-pub struct UdevBackend;
+pub struct UdevBackend {
+    _session: AutoSession,
+    _notifier: AutoSessionNotifier,
+}
 
 impl Backend for UdevBackend {
-    fn new(_logger: Logger, _handle: LoopHandle<'_, NameMe>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
+    fn new(logger: Logger, _handle: LoopHandle<'_, NameMe>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized,
     {
-        Ok(UdevBackend)
+        let (session, notifier) = AutoSession::new(logger).unwrap();
+
+        Ok(UdevBackend {
+            _session: session,
+            _notifier: notifier,
+        })
     }
 
     fn available() -> bool
