@@ -6,7 +6,7 @@ use smithay::{
     reexports::{calloop::LoopHandle, wayland_server::Display},
 };
 
-use crate::state::State;
+use crate::state::NameMe;
 
 use super::Backend;
 
@@ -14,15 +14,11 @@ use super::Backend;
 pub struct UdevBackend;
 
 impl Backend for UdevBackend {
-    fn init(
-        _logger: Logger,
-        _handle: LoopHandle<'static, State>,
-        _display: &mut Display,
-    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
+    fn new(_logger: Logger, _handle: LoopHandle<'_, NameMe>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized,
     {
-        Ok(Box::new(UdevBackend))
+        Ok(UdevBackend)
     }
 
     fn available() -> bool
@@ -38,6 +34,10 @@ impl Backend for UdevBackend {
     }
 
     fn logger(&self) -> &Logger {
+        todo!()
+    }
+
+    fn setup_outputs(&mut self, _display: &mut Display) {
         todo!()
     }
 }

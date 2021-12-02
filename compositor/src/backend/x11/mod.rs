@@ -9,48 +9,52 @@ use smithay::{
     reexports::{calloop::LoopHandle, wayland_server::Display},
 };
 
-use crate::state::State;
+use crate::state::NameMe;
 
 use super::Backend;
 
 #[derive(Debug)]
 pub struct X11Backend {
     logger: Logger,
-    window: Window,
-    surface: X11Surface,
+    // TODO: Replace this with X11Handle when PR is merged.
+    _window: Window,
+    outputs: Vec<X11Output>,
 }
 
 impl Backend for X11Backend {
-    fn init(
-        logger: Logger,
-        handle: LoopHandle<'static, State>,
-        _display: &mut Display,
-    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
+    fn new(logger: Logger, handle: LoopHandle<'_, NameMe>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized,
     {
-        let (backend, surface) = backend::x11::X11Backend::new(logger.clone())?;
+        let backend = backend::x11::X11Backend::new(logger.clone())?;
+        let window = backend.window();
         let logger = logger.new(slog::o!("backend" => "x11"));
 
-        let window = backend.window();
-
-        #[allow(clippy::single_match)] // temporary
-        handle.insert_source(backend, |event, _window, state| match event {
+        handle.insert_source(backend, |event, window, name_me| match event {
             X11Event::CloseRequested => {
-                info!(state.backend().logger(), "Closing compositor");
-                state.continue_loop = false;
+                let backend = name_me.state.downcast_backend_mut::<Self>().unwrap();
+
+                backend.outputs.retain(|output| &output.window != window);
+
+                if backend.outputs.is_empty() {
+                    info!(
+                        name_me.state.backend().logger(),
+                        "Quitting because all outputs are destroyed"
+                    );
+                    name_me.state.continue_loop = false;
+                }
             }
 
-            X11Event::Input(event) => state.handle_input(event),
+            X11Event::Input(event) => name_me.state.handle_input(event),
 
             _ => (),
         })?;
 
-        Ok(Box::new(X11Backend {
+        Ok(X11Backend {
             logger,
-            window,
-            surface,
-        }))
+            _window: window,
+            outputs: vec![],
+        })
     }
 
     fn available() -> bool
@@ -66,5 +70,21 @@ impl Backend for X11Backend {
 
     fn logger(&self) -> &Logger {
         &self.logger
+    }
+
+    fn setup_outputs(&mut self, _display: &mut Display) {
+        // TODO: Pending multi-window support.
+    }
+}
+
+#[derive(Debug)]
+struct X11Output {
+    window: Window,
+    _surface: X11Surface,
+}
+
+impl Drop for X11Output {
+    fn drop(&mut self) {
+        // TODO: Destroy the global?
     }
 }

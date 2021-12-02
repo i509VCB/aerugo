@@ -1,15 +1,12 @@
-use slog::{error, info, Logger};
+use slog::{info, Logger};
 use smithay::{
     backend::input::{InputBackend, InputEvent},
-    reexports::{
-        calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
-        wayland_server::Display,
-    },
+    reexports::wayland_server::Display,
     wayland::{compositor::compositor_init, data_device, shm::init_shm_global},
 };
-use std::{cell::RefCell, error::Error, rc::Rc, time::Duration};
+use std::error::Error;
 
-use crate::{backend::Backend, shell::Shell, CreateBackendFn};
+use crate::backend::Backend;
 
 #[derive(Debug)]
 pub enum Socket {
@@ -24,41 +21,34 @@ pub enum Socket {
 }
 
 #[derive(Debug)]
-pub struct State {
+pub struct NameMe {
+    pub display: Display,
+    pub state: CompositorState,
+}
+
+#[derive(Debug)]
+pub struct CompositorState {
     pub logger: Logger,
-    pub display: Rc<RefCell<Display>>,
     pub continue_loop: bool,
     socket_name: Option<String>,
     backend: Box<dyn Backend>,
-    shell: Shell,
 }
 
-#[warn(missing_docs)] // Use of these functions should be explicitly known.
-impl State {
+// Use of these functions should be explicitly known.
+#[warn(missing_docs)]
+impl CompositorState {
     /// Returns a new instance of the compositor state.
     ///
     /// This function takes another function used to instantiate the backend the compositor should use.
     pub fn new(
         logger: Logger,
-        loop_handle: LoopHandle<'static, State>,
-        display: Rc<RefCell<Display>>,
+        display: &mut Display,
         socket_name: Socket,
-        backend: CreateBackendFn,
-    ) -> Result<State, Box<dyn Error>> {
-        let (backend, shell) = {
-            let display = &mut *display.borrow_mut();
-
-            insert_wayland_source(loop_handle.clone(), display)?;
-            // Initialize compositor globals
-            setup_globals(display, logger.clone())?;
-
-            let backend = backend(logger.clone(), loop_handle.clone(), display)?;
-
-            // Initialize the shell, in our case the XDG and Layer shell
-            (backend, Shell::new(display, logger.clone())?)
-        };
-
+        backend: Box<dyn Backend + '_>,
+    ) -> Result<CompositorState, Box<dyn Error>> {
         info!(logger, r#"Starting with backend "{backend}""#, backend = backend.name());
+
+        setup_globals(display, logger.clone())?;
 
         let socket_name = {
             match socket_name {
@@ -66,14 +56,13 @@ impl State {
 
                 Socket::Auto => Some(
                     display
-                        .borrow_mut()
                         .add_socket_auto()?
                         .into_string()
                         .expect("Wayland socket name was not a Rust string"),
                 ),
 
                 Socket::Named(socket_name) => {
-                    display.borrow_mut().add_socket(Some(socket_name.clone()))?;
+                    display.add_socket(Some(socket_name.clone()))?;
                     Some(socket_name)
                 }
             }
@@ -83,13 +72,11 @@ impl State {
             info!(logger, "Listening on wayland socket"; "name" => socket_name);
         }
 
-        Ok(State {
+        Ok(CompositorState {
             logger,
-            display,
             continue_loop: true,
             socket_name,
             backend,
-            shell,
         })
     }
 
@@ -131,16 +118,6 @@ impl State {
         self.backend.downcast_mut()
     }
 
-    /// Returns a reference to the objects managed by the compositor's shell.
-    pub fn shell(&self) -> &Shell {
-        &self.shell
-    }
-
-    /// Returns a unique reference to the objects managed by the compositor's shell.
-    pub fn shell_mut(&mut self) -> &mut Shell {
-        &mut self.shell
-    }
-
     /// Returns `true` if the compositor's event loop should shut down the compositor.
     pub fn should_continue(&mut self) -> bool {
         if !self.continue_loop {
@@ -164,39 +141,15 @@ impl State {
     }
 }
 
-fn insert_wayland_source(handle: LoopHandle<'static, State>, display: &Display) -> Result<(), Box<dyn Error>> {
-    handle.insert_source(
-        Generic::from_fd(
-            // The file descriptor which indicates there are pending messages
-            display.get_poll_fd(),
-            Interest::READ,
-            Mode::Level,
-        ),
-        move |_, _, state: &mut State| {
-            let display = state.display.clone();
-            let mut display = display.borrow_mut();
-
-            if let Err(err) = display.dispatch(Duration::ZERO, state) {
-                error!(state.logger, "Error while dispatching requests"; "error" => &err);
-                state.continue_loop = false;
-                Err(err)
-            } else {
-                Ok(PostAction::Continue)
-            }
-        },
-    )?;
-
-    Ok(())
-}
-
 fn setup_globals(display: &mut Display, logger: Logger) -> Result<(), Box<dyn Error>> {
     // TODO: Should we offer any additional formats for the shm global?
     init_shm_global(display, vec![], logger.clone());
 
     compositor_init(
         display,
-        move |surface, mut ddata| {
-            ddata.get::<State>().unwrap().handle_surface_commit(&surface);
+        move |_surface, mut _ddata| {
+            todo!()
+            //ddata.get::<CompositorState>().unwrap().handle_surface_commit(&surface);
         },
         logger.clone(),
     );

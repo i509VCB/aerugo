@@ -73,14 +73,13 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
             .queues
             .iter()
             .map(|queue| {
-                let create_info = DeviceQueueCreateInfo {
+                DeviceQueueCreateInfo {
                     queue_family_index: queue.index as u32,
                     queue_count: 1,
+                    // TODO: Multi queue priorities?
                     p_queue_priorities: [1.0f32].as_ptr(),
                     ..Default::default()
-                };
-
-                create_info
+                }
             })
             .collect::<Vec<_>>();
 

@@ -125,7 +125,7 @@ impl BackendSelection {
                 #[cfg(feature = "wayland_backend")]
                 {
                     if WaylandBackend::available() {
-                        return Ok(run(logger.clone(), WaylandBackend::new, socket)?);
+                        return Ok(run::<WaylandBackend>(logger.clone(), socket)?);
                     }
                 }
 
@@ -133,7 +133,7 @@ impl BackendSelection {
                 #[cfg(feature = "x11_backend")]
                 {
                     if X11Backend::available() {
-                        return Ok(run(logger, X11Backend::init, socket)?);
+                        return Ok(run::<X11Backend>(logger, socket)?);
                     }
                 }
 
@@ -144,21 +144,21 @@ impl BackendSelection {
         #[cfg(feature = "wayland_backend")]
         {
             if self.wayland {
-                return Ok(run(logger, WaylandBackend::new, socket)?);
+                return Ok(run::<WaylandBackend>(logger, socket)?);
             }
         }
 
         #[cfg(feature = "x11_backend")]
         {
             if self.x11 {
-                return Ok(run(logger, X11Backend::init, socket)?);
+                return Ok(run::<X11Backend>(logger, socket)?);
             }
         }
 
         #[cfg(feature = "udev_backend")]
         {
             if self.udev {
-                return Ok(run(logger, UdevBackend::init, socket)?);
+                return Ok(run::<UdevBackend>(logger, socket)?);
             }
         }
 
@@ -168,7 +168,7 @@ impl BackendSelection {
         {
             // Try Wayland as first fallback if enabled
             if WaylandBackend::available() {
-                return Ok(run(logger, WaylandBackend::new, socket)?);
+                return Ok(run::<WaylandBackend>(logger, socket)?);
             }
         }
 
@@ -176,14 +176,14 @@ impl BackendSelection {
         {
             // Then try X as fallback
             if X11Backend::available() {
-                return Ok(run(logger, X11Backend::init, socket)?);
+                return Ok(run::<X11Backend>(logger, socket)?);
             }
         }
 
         #[cfg(feature = "udev_backend")]
         {
             if UdevBackend::available() {
-                return Ok(run(logger, UdevBackend::init, socket)?);
+                return Ok(run::<UdevBackend>(logger, socket)?);
             }
         }
 

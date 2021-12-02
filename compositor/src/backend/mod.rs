@@ -13,7 +13,7 @@ use downcast_rs::{impl_downcast, Downcast};
 use slog::Logger;
 use smithay::reexports::{calloop::LoopHandle, wayland_server::Display};
 
-use crate::state::State;
+use crate::state::NameMe;
 
 /// A trait specifying the implementation of a backend.
 ///
@@ -27,11 +27,7 @@ use crate::state::State;
 /// Data may be accessed in most places through [`State::backend`] or [`State::backend_mut`] inside of callbacks or
 /// [`DispatchData`](smithay::reexports::wayland_server::DispatchData) and then downcast to the backend internal type.
 pub trait Backend: fmt::Debug + Downcast {
-    fn init(
-        _logger: Logger,
-        _handle: LoopHandle<'static, State>,
-        _display: &mut Display,
-    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
+    fn new(_logger: Logger, _handle: LoopHandle<'_, NameMe>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized;
 
@@ -51,6 +47,9 @@ pub trait Backend: fmt::Debug + Downcast {
     ///
     /// This logger may be used to log under the name of the module inside of a callback.
     fn logger(&self) -> &Logger;
+
+    /// Perform initial output setup.
+    fn setup_outputs(&mut self, _display: &mut Display);
 }
 
 impl_downcast!(Backend);

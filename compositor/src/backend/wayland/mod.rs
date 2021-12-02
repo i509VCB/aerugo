@@ -11,15 +11,11 @@ use super::Backend;
 pub struct WaylandBackend;
 
 impl Backend for WaylandBackend {
-    fn init(
-        _logger: Logger,
-        _handle: LoopHandle<'static, State>,
-        _display: &mut Display,
-    ) -> Result<Box<dyn Backend>, Box<dyn Error>>
+    fn new(_logger: Logger, _handle: LoopHandle<'_, State>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized,
     {
-        Ok(Box::new(WaylandBackend))
+        Ok(WaylandBackend)
     }
 
     fn available() -> bool
