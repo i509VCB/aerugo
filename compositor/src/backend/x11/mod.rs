@@ -4,9 +4,11 @@ use slog::{info, Logger};
 use smithay::{
     backend::{
         self,
+        drm::DrmNode,
+        egl::EGLDisplay,
         x11::{Window, X11Event, X11Surface},
     },
-    reexports::{calloop::LoopHandle, wayland_server::Display},
+    reexports::{calloop::LoopHandle, gbm, wayland_server::Display},
 };
 
 use crate::state::NameMe;
@@ -17,8 +19,14 @@ use super::Backend;
 pub struct X11Backend {
     logger: Logger,
     // TODO: Replace this with X11Handle when PR is merged.
-    _window: Window,
+    window: Option<Window>,
     outputs: Vec<X11Output>,
+    // TODO: Replace this with the mutex we use for the device?
+    gbm_device: Option<gbm::Device<DrmNode>>,
+
+    // TODO: Vulkan in the future
+    #[allow(dead_code)]
+    egl_display: EGLDisplay,
 }
 
 impl Backend for X11Backend {
@@ -30,30 +38,21 @@ impl Backend for X11Backend {
         let window = backend.window();
         let logger = logger.new(slog::o!("backend" => "x11"));
 
-        handle.insert_source(backend, |event, window, name_me| match event {
-            X11Event::CloseRequested => {
-                let backend = name_me.state.downcast_backend_mut::<Self>().unwrap();
+        // Setup the renderer
+        let drm_node = backend.drm_node()?;
+        let gbm_device = gbm::Device::new(drm_node)?;
+        // EGL init
+        let egl_display = EGLDisplay::new(&gbm_device, logger.clone())?;
 
-                backend.outputs.retain(|output| &output.window != window);
-
-                if backend.outputs.is_empty() {
-                    info!(
-                        name_me.state.backend().logger(),
-                        "Quitting because all outputs are destroyed"
-                    );
-                    name_me.state.continue_loop = false;
-                }
-            }
-
-            X11Event::Input(event) => name_me.state.handle_input(event),
-
-            _ => (),
-        })?;
+        handle.insert_source(backend, handle_backend_event)?;
 
         Ok(X11Backend {
             logger,
-            _window: window,
+            // TODO: Replace with X11Handle
+            window: Some(window),
             outputs: vec![],
+            gbm_device: Some(gbm_device),
+            egl_display,
         })
     }
 
@@ -73,18 +72,56 @@ impl Backend for X11Backend {
     }
 
     fn setup_outputs(&mut self, _display: &mut Display) {
-        // TODO: Pending multi-window support.
+        // We start with one window.
+        // TODO: Create window when multi-window is merged
+        let window = self.window.take().unwrap();
+        // TODO: Lock the gbm device mutex when multi-window is merged.
+        let _gbm_device = self.gbm_device.take().unwrap();
+
+        // let surface = X11Surface::new();
+
+        // Create the output
+        let _output = X11Output {
+            window,
+            surface: todo!("X11 multi-window"),
+        };
     }
 }
 
 #[derive(Debug)]
 struct X11Output {
     window: Window,
-    _surface: X11Surface,
+    #[allow(dead_code)]
+    surface: X11Surface,
 }
 
 impl Drop for X11Output {
     fn drop(&mut self) {
         // TODO: Destroy the global?
+    }
+}
+
+/// Handler for events dispatched by the X11 backend.
+fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut NameMe) {
+    match event {
+        X11Event::CloseRequested => {
+            let backend = name_me.state.downcast_backend_mut::<X11Backend>().unwrap();
+
+            // Destroy the output for the window that has been closed.
+            // TODO: Wait does the window get closed actually?
+            backend.outputs.retain(|output| &output.window != window);
+
+            if backend.outputs.is_empty() {
+                info!(
+                    name_me.state.backend().logger(),
+                    "Quitting because all outputs are destroyed"
+                );
+                name_me.state.continue_loop = false;
+            }
+        }
+
+        X11Event::Input(event) => name_me.state.handle_input(event),
+
+        _ => (),
     }
 }

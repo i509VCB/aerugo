@@ -27,15 +27,16 @@ where
     let mut display = Display::new();
     let mut event_loop = EventLoop::try_new()?;
 
-    // Make sure we dispatch the display when there are pending requests.
-    insert_wayland_readiness_source(event_loop.handle(), &display)?;
-
     let mut backend = Box::new(B::new(logger.clone(), event_loop.handle(), &mut display)?);
-    // TODO: Renderer init
+
     // Create the outputs to start with.
     backend.setup_outputs(&mut display);
 
     let state = CompositorState::new(logger, &mut display, socket, backend as Box<_>)?;
+
+    // Make sure we dispatch the display when there are pending requests.
+    insert_wayland_readiness_source(event_loop.handle(), &display)?;
+
     let mut name_me = NameMe { display, state };
 
     // Signal used to shut down the event loop..
