@@ -1,12 +1,17 @@
-use std::{env, error::Error};
+use std::{
+    env,
+    error::Error,
+    sync::{Arc, Mutex},
+};
 
 use slog::{info, Logger};
 use smithay::{
     backend::{
-        self,
+        self, allocator,
         drm::DrmNode,
         egl::{EGLContext, EGLDisplay},
-        x11::{Window, X11Event, X11Surface},
+        renderer::{gles2::Gles2Renderer, Bind, Frame, Renderer, Transform, Unbind},
+        x11::{Window, WindowBuilder, X11Event, X11Handle, X11Surface},
     },
     reexports::{calloop::LoopHandle, gbm, wayland_server::Display},
 };
@@ -18,16 +23,16 @@ use super::Backend;
 #[derive(Debug)]
 pub struct X11Backend {
     logger: Logger,
-    // TODO: Replace this with X11Handle when PR is merged.
-    window: Option<Window>,
+    handle: X11Handle,
     outputs: Vec<X11Output>,
-    // TODO: Replace this with the mutex we use for the device?
-    gbm_device: Option<gbm::Device<DrmNode>>,
+    formats: Vec<allocator::Modifier>,
 
     // TODO: Vulkan in the future
-    #[allow(dead_code)]
-    egl_display: EGLDisplay,
-    egl_context: EGLContext,
+    renderer: Gles2Renderer,
+    _egl_display: EGLDisplay,
+    // The native display type must outlive everything created by EGL. Even though the display dropping before
+    // this is fine, it is not ideal to have this dropped before the display.
+    gbm_device: Arc<Mutex<gbm::Device<DrmNode>>>,
 }
 
 impl Backend for X11Backend {
@@ -36,26 +41,34 @@ impl Backend for X11Backend {
         Self: Sized,
     {
         let backend = backend::x11::X11Backend::new(logger.clone())?;
-        let window = backend.window();
+        let x_handle = backend.handle();
         let logger = logger.new(slog::o!("backend" => "x11"));
 
         // Setup the renderer
-        let drm_node = backend.drm_node()?;
-        let gbm_device = gbm::Device::new(drm_node)?;
+        let gbm_device = gbm::Device::new(x_handle.drm_node()?)?;
         // EGL init
         let egl_display = EGLDisplay::new(&gbm_device, logger.clone())?;
         let egl_context = EGLContext::new(&egl_display, logger.clone())?;
+
+        // Store the supported formats
+        let formats = egl_context
+            .dmabuf_texture_formats()
+            .iter()
+            .map(|format| format.modifier)
+            .collect::<Vec<_>>();
+
+        let renderer = unsafe { Gles2Renderer::new(egl_context, logger.clone()) }?;
 
         handle.insert_source(backend, handle_backend_event)?;
 
         Ok(X11Backend {
             logger,
-            // TODO: Replace with X11Handle
-            window: Some(window),
+            handle: x_handle,
             outputs: vec![],
-            gbm_device: Some(gbm_device),
-            egl_display,
-            egl_context,
+            formats,
+            renderer,
+            _egl_display: egl_display,
+            gbm_device: Arc::new(Mutex::new(gbm_device)),
         })
     }
 
@@ -76,24 +89,18 @@ impl Backend for X11Backend {
 
     fn setup_outputs(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
         // We start with one window.
-        // TODO: Create window when multi-window is merged
-        let window = self.window.take().unwrap();
-        // TODO: Lock the gbm device mutex when multi-window is merged.
-        let gbm_device = self.gbm_device.take().unwrap();
+        let window = WindowBuilder::new().title("Output 1").build(&self.handle)?;
 
-        let surface = X11Surface::new(
-            todo!(),
-            gbm_device,
-            self.egl_context
-                .dmabuf_texture_formats()
-                .iter()
-                .map(|format| format.modifier),
-        )?;
+        let surface = self
+            .handle
+            .create_surface(&window, self.gbm_device.clone(), self.formats.iter().copied())?;
 
         // Create the output
         let output = X11Output { window, surface };
 
         self.outputs.push(output);
+
+        Ok(())
     }
 }
 
@@ -130,6 +137,45 @@ fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut Name
         }
 
         X11Event::Input(event) => name_me.state.handle_input(event),
+
+        X11Event::Refresh | X11Event::PresentCompleted => {
+            // TODO: Rendering with damage.
+
+            let backend = name_me.state.downcast_backend_mut::<X11Backend>().unwrap();
+
+            match backend.outputs.iter_mut().find(|output| &output.window == window) {
+                Some(output) => {
+                    match output.surface.buffer() {
+                        Ok((dmabuf, _age)) => {
+                            let size = output.surface.window().size();
+                            let size = (size.w as i32, size.h as i32).into();
+
+                            backend.renderer.bind(dmabuf).expect("TODO: Bind handling");
+
+                            backend
+                                .renderer
+                                .render(size, Transform::_180, |_renderer, frame| {
+                                    // TODO: Call rendering functions
+                                    frame.clear([0.5, 0.75, 0.5, 1.0])
+                                })
+                                .expect("Rendering error")
+                                .expect("Rendering error");
+
+                            backend.renderer.unbind().expect("unbind");
+
+                            // Mark the buffer as submitted to present
+                            output.surface.submit().expect("Submit buffer");
+                        }
+
+                        Err(alloc) => {
+                            panic!("Allocate on acquire, {}", alloc);
+                        }
+                    }
+                }
+
+                None => todo!(),
+            }
+        }
 
         _ => (),
     }
