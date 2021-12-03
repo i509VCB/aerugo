@@ -49,7 +49,7 @@ pub trait Backend: fmt::Debug + Downcast {
     fn logger(&self) -> &Logger;
 
     /// Perform initial output setup.
-    fn setup_outputs(&mut self, _display: &mut Display);
+    fn setup_outputs(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>>;
 }
 
 impl_downcast!(Backend);

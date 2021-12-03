@@ -5,7 +5,7 @@ use smithay::{
     backend::{
         self,
         drm::DrmNode,
-        egl::EGLDisplay,
+        egl::{EGLContext, EGLDisplay},
         x11::{Window, X11Event, X11Surface},
     },
     reexports::{calloop::LoopHandle, gbm, wayland_server::Display},
@@ -27,6 +27,7 @@ pub struct X11Backend {
     // TODO: Vulkan in the future
     #[allow(dead_code)]
     egl_display: EGLDisplay,
+    egl_context: EGLContext,
 }
 
 impl Backend for X11Backend {
@@ -43,6 +44,7 @@ impl Backend for X11Backend {
         let gbm_device = gbm::Device::new(drm_node)?;
         // EGL init
         let egl_display = EGLDisplay::new(&gbm_device, logger.clone())?;
+        let egl_context = EGLContext::new(&egl_display, logger.clone())?;
 
         handle.insert_source(backend, handle_backend_event)?;
 
@@ -53,6 +55,7 @@ impl Backend for X11Backend {
             outputs: vec![],
             gbm_device: Some(gbm_device),
             egl_display,
+            egl_context,
         })
     }
 
@@ -71,20 +74,26 @@ impl Backend for X11Backend {
         &self.logger
     }
 
-    fn setup_outputs(&mut self, _display: &mut Display) {
+    fn setup_outputs(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
         // We start with one window.
         // TODO: Create window when multi-window is merged
         let window = self.window.take().unwrap();
         // TODO: Lock the gbm device mutex when multi-window is merged.
-        let _gbm_device = self.gbm_device.take().unwrap();
+        let gbm_device = self.gbm_device.take().unwrap();
 
-        // let surface = X11Surface::new();
+        let surface = X11Surface::new(
+            todo!(),
+            gbm_device,
+            self.egl_context
+                .dmabuf_texture_formats()
+                .iter()
+                .map(|format| format.modifier),
+        )?;
 
         // Create the output
-        let _output = X11Output {
-            window,
-            surface: todo!("X11 multi-window"),
-        };
+        let output = X11Output { window, surface };
+
+        self.outputs.push(output);
     }
 }
 

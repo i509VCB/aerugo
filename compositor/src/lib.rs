@@ -30,7 +30,7 @@ where
     let mut backend = Box::new(B::new(logger.clone(), event_loop.handle(), &mut display)?);
 
     // Create the outputs to start with.
-    backend.setup_outputs(&mut display);
+    backend.setup_outputs(&mut display)?;
 
     let state = CompositorState::new(logger, &mut display, socket, backend as Box<_>)?;
 
