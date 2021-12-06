@@ -10,6 +10,7 @@ use smithay::{
         self, allocator,
         drm::DrmNode,
         egl::{EGLContext, EGLDisplay},
+        input::{InputEvent, KeyState, KeyboardKeyEvent},
         renderer::{gles2::Gles2Renderer, Bind, Frame, Renderer, Transform, Unbind},
         x11::{Window, WindowBuilder, X11Event, X11Handle, X11Surface},
     },
@@ -89,7 +90,9 @@ impl Backend for X11Backend {
 
     fn setup_outputs(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
         // We start with one window.
-        let window = WindowBuilder::new().title("Output 1").build(&self.handle)?;
+        let window = WindowBuilder::new()
+            .title("Output 1 - Press Super + O to create a new output")
+            .build(&self.handle)?;
 
         let surface = self
             .handle
@@ -101,6 +104,25 @@ impl Backend for X11Backend {
         self.outputs.push(output);
 
         Ok(())
+    }
+
+    fn create_new_output(&mut self) {
+        // Get output number
+        let number = self.outputs.len() + 1;
+
+        let window = WindowBuilder::new()
+            .title(&format!("Output {}", number))
+            .build(&self.handle)
+            .expect("Failed to create new output");
+
+        let surface = self
+            .handle
+            .create_surface(&window, self.gbm_device.clone(), self.formats.iter().copied())
+            .expect("Failed to create new surface");
+
+        let output = X11Output { window, surface };
+
+        self.outputs.push(output);
     }
 }
 
@@ -136,44 +158,52 @@ fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut Name
             }
         }
 
-        X11Event::Input(event) => name_me.state.handle_input(event),
+        X11Event::Input(event) => {
+            if let InputEvent::Keyboard { event } = event {
+                if event.key_code() == 24 // KEY_O
+                    && event.state() == KeyState::Pressed
+                {
+                    name_me.state.backend_mut().create_new_output();
+                }
+            }
+
+            name_me.state.handle_input(event)
+        }
 
         X11Event::Refresh | X11Event::PresentCompleted => {
             // TODO: Rendering with damage.
 
             let backend = name_me.state.downcast_backend_mut::<X11Backend>().unwrap();
 
-            match backend.outputs.iter_mut().find(|output| &output.window == window) {
-                Some(output) => {
-                    match output.surface.buffer() {
-                        Ok((dmabuf, _age)) => {
-                            let size = output.surface.window().size();
-                            let size = (size.w as i32, size.h as i32).into();
+            // Only try to present if the output exists. If the output does not exist, we have likely recidved a present completed
+            // event from a destroyed window.
+            if let Some(output) = backend.outputs.iter_mut().find(|output| &output.window == window) {
+                match output.surface.buffer() {
+                    Ok((dmabuf, _age)) => {
+                        let size = output.surface.window().size();
+                        let size = (size.w as i32, size.h as i32).into();
 
-                            backend.renderer.bind(dmabuf).expect("TODO: Bind handling");
+                        backend.renderer.bind(dmabuf).expect("TODO: Bind handling");
 
-                            backend
-                                .renderer
-                                .render(size, Transform::_180, |_renderer, frame| {
-                                    // TODO: Call rendering functions
-                                    frame.clear([0.5, 0.75, 0.5, 1.0])
-                                })
-                                .expect("Rendering error")
-                                .expect("Rendering error");
+                        backend
+                            .renderer
+                            .render(size, Transform::_180, |_renderer, frame| {
+                                // TODO: Call rendering functions
+                                frame.clear([0.5, 0.75, 0.5, 1.0])
+                            })
+                            .expect("Rendering error")
+                            .expect("Rendering error");
 
-                            backend.renderer.unbind().expect("unbind");
+                        backend.renderer.unbind().expect("unbind");
 
-                            // Mark the buffer as submitted to present
-                            output.surface.submit().expect("Submit buffer");
-                        }
+                        // Mark the buffer as submitted to present
+                        output.surface.submit().expect("Submit buffer");
+                    }
 
-                        Err(alloc) => {
-                            panic!("Allocate on acquire, {}", alloc);
-                        }
+                    Err(alloc) => {
+                        panic!("Allocate on acquire, {}", alloc);
                     }
                 }
-
-                None => todo!(),
             }
         }
 

@@ -48,4 +48,8 @@ impl Backend for UdevBackend {
     fn setup_outputs(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>> {
         todo!()
     }
+
+    fn create_new_output(&mut self) {
+        todo!()
+    }
 }

@@ -20,7 +20,8 @@ ash = { git = "https://github.com/MaikKlein/ash" }
 lazy_static = "1.4.0"
 
 [dependencies.smithay]
-git = "https://github.com/Smithay/smithay"
+git = "https://github.com/i509VCB/smithay/"
+branch = "x11/fix-reentrance"
 default-features = false
 features = [
     # Renderer

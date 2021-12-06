@@ -50,6 +50,8 @@ pub trait Backend: fmt::Debug + Downcast {
 
     /// Perform initial output setup.
     fn setup_outputs(&mut self, _display: &mut Display) -> Result<(), Box<dyn Error>>;
+
+    fn create_new_output(&mut self);
 }
 
 impl_downcast!(Backend);
