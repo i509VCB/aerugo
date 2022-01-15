@@ -25,8 +25,12 @@ checksum = "c5d78ce20460b82d3fa150275ed9d55e21064fc7951177baacf86a145c4a4b1f"
 
 [[package]]
 name = "ash"
-version = "0.33.3+1.2.191"
-source = "git+https://github.com/MaikKlein/ash#0cddbad6185231445c7cc7cc42a0d41b42dd63cd"
+version = "0.35.0+1.2.203"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a7638ce84f8c84d6fd6faa63aa267574d345181ba591c0eeb5550d4c30cd600"
+dependencies = [
+ "libloading",
+]
 
 [[package]]
 name = "atty"
@@ -749,7 +753,7 @@ checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/i509VCB/smithay/?branch=x11/fix-reentrance#d455b7450d410ded8488c3b69f1f9820b40bf6f8"
+source = "git+https://github.com/Smithay/smithay/#d554c7d2b9ba3e845807b9148de5b392afec65c4"
 dependencies = [
  "appendlist",
  "bitflags",

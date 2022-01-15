@@ -519,7 +519,7 @@ impl Display for VersionDisplayer<'_> {
 }
 
 lazy_static! {
-    static ref LIBRARY: Entry = Entry::new();
+    static ref LIBRARY: Entry = unsafe { Entry::load() }.unwrap();
 }
 
 unsafe extern "system" fn vulkan_debug_utils_callback(

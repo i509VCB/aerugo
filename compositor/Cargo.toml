@@ -16,12 +16,11 @@ slog-scope = "4.4.0"
 downcast-rs = "1.2.0"
 directories = "4.0.1"
 
-ash = { git = "https://github.com/MaikKlein/ash" }
+ash = "0.35.0"
 lazy_static = "1.4.0"
 
 [dependencies.smithay]
-git = "https://github.com/i509VCB/smithay/"
-branch = "x11/fix-reentrance"
+git = "https://github.com/Smithay/smithay/"
 default-features = false
 features = [
     # Renderer

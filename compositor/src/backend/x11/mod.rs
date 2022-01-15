@@ -15,6 +15,7 @@ use smithay::{
         x11::{Window, WindowBuilder, X11Event, X11Handle, X11Surface},
     },
     reexports::{calloop::LoopHandle, gbm, wayland_server::Display},
+    utils::Rectangle,
 };
 
 use crate::state::NameMe;
@@ -140,14 +141,14 @@ impl Drop for X11Output {
 }
 
 /// Handler for events dispatched by the X11 backend.
-fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut NameMe) {
+fn handle_backend_event(event: X11Event, _: &mut (), name_me: &mut NameMe) {
     match event {
-        X11Event::CloseRequested => {
+        X11Event::CloseRequested { window_id } => {
             let backend = name_me.state.downcast_backend_mut::<X11Backend>().unwrap();
 
             // Destroy the output for the window that has been closed.
             // TODO: Wait does the window get closed actually?
-            backend.outputs.retain(|output| &output.window != window);
+            backend.outputs.retain(|output| output.window.id() != window_id);
 
             if backend.outputs.is_empty() {
                 info!(
@@ -159,7 +160,7 @@ fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut Name
         }
 
         X11Event::Input(event) => {
-            if let InputEvent::Keyboard { event } = event {
+            if let InputEvent::Keyboard { ref event } = event {
                 if event.key_code() == 24 // KEY_O
                     && event.state() == KeyState::Pressed
                 {
@@ -167,21 +168,39 @@ fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut Name
                 }
             }
 
-            name_me.state.handle_input(event)
+            name_me.state.handle_input(event);
         }
 
-        X11Event::Refresh | X11Event::PresentCompleted => {
+        // TODO
+        X11Event::Resized {
+            window_id: _,
+            new_size: _,
+        } => (),
+
+        X11Event::Refresh { window_id } | X11Event::PresentCompleted { window_id } => {
             // TODO: Rendering with damage.
 
             let backend = name_me.state.downcast_backend_mut::<X11Backend>().unwrap();
 
             // Only try to present if the output exists. If the output does not exist, we have likely recidved a present completed
             // event from a destroyed window.
-            if let Some(output) = backend.outputs.iter_mut().find(|output| &output.window == window) {
+            if let Some(output) = backend
+                .outputs
+                .iter_mut()
+                .find(|output| output.window.id() == window_id)
+            {
                 match output.surface.buffer() {
                     Ok((dmabuf, _age)) => {
-                        let size = output.surface.window().size();
-                        let size = (size.w as i32, size.h as i32).into();
+                        let size = match output.surface.window() {
+                            Some(window) => {
+                                let size = window.as_ref().size();
+                                (size.w as i32, size.h as i32).into()
+                            }
+
+                            None => {
+                                panic!("Dead window?");
+                            }
+                        };
 
                         backend.renderer.bind(dmabuf).expect("TODO: Bind handling");
 
@@ -189,9 +208,9 @@ fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut Name
                             .renderer
                             .render(size, Transform::_180, |_renderer, frame| {
                                 // TODO: Call rendering functions
-                                frame.clear([0.5, 0.75, 0.5, 1.0])
+                                frame.clear([0.5, 0.75, 0.5, 1.0], &[Rectangle::from_loc_and_size((0, 0), size)])
                             })
-                            .expect("Rendering error")
+                            .map(Result::unwrap)
                             .expect("Rendering error");
 
                         backend.renderer.unbind().expect("unbind");
@@ -206,7 +225,5 @@ fn handle_backend_event(event: X11Event, window: &mut Window, name_me: &mut Name
                 }
             }
         }
-
-        _ => (),
     }
 }
