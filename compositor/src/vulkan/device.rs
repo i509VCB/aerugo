@@ -5,7 +5,12 @@ use std::{
 
 use ash::vk::{DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo};
 
-use super::{InstanceError, InstanceInner, PhysicalDevice, QueueFamily, Version};
+use super::{
+    instance::{InstanceError, InstanceInner},
+    physical_device::PhysicalDevice,
+    queue::QueueFamily,
+    Version,
+};
 
 /// A builder used to construct a device.
 #[derive(Debug)]
@@ -21,7 +26,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     ///
     /// The extension must be supported by the Vulkan runtime or else building the instance will fail. A great way to
     /// ensure the extension you are requesting is supported is to check if your extension is listed in
-    /// [`enumerate_extensions`].
+    /// [`Instance::enumerate_extensions`].
     pub fn extension(mut self, extension: impl Into<String>) -> Self {
         self.enable_extensions.push(extension.into());
         self

@@ -1,12 +1,13 @@
-#![allow(dead_code)] // Because this is an experiment for a future pull request.
-#![warn(missing_docs)]
-
 use std::ffi::CStr;
 
 use ash::extensions::ext::PhysicalDeviceDrm;
 use smithay::backend::drm::{DrmNode, NodeType};
 
-use super::{queue::QueueFamily, Instance, InstanceError, Version};
+use super::{
+    instance::{Instance, InstanceError},
+    queue::QueueFamily,
+    Version,
+};
 
 /// A physical device provided by a Vulkan instance.
 #[derive(Debug)]
@@ -61,7 +62,8 @@ impl PhysicalDevice<'_> {
                 Ok(PhysicalDevice {
                     instance,
                     inner: device,
-                    /* Some pre fetched fields that are useful during enumeration */
+
+                    // Some pre fetched fields that are useful during enumeration
                     name,
                     properties,
                     features,
@@ -89,11 +91,10 @@ impl PhysicalDevice<'_> {
         Ok(PhysicalDevice::enumerate(instance)?.find(|device| {
             let handle = unsafe { device.handle() };
 
-            // Does the device support VK_EXT_physical_device_drm
             if device.supports_extension("VK_EXT_physical_device_drm") {
                 let node = node.as_ref();
 
-                // SAFETY: Physical device declares support for VK_EXT_physical_device_drm
+                // SAFETY: Physical device supports for VK_EXT_physical_device_drm
                 let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle(), handle) };
 
                 match node.ty() {

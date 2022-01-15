@@ -1011,6 +1011,7 @@ dependencies = [
  "slog-stdlog",
  "slog-term",
  "smithay",
+ "thiserror",
 ]
 
 [[package]]
