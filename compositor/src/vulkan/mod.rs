@@ -45,7 +45,7 @@ use ash::{
     vk::{ApplicationInfo, DebugUtilsMessengerCreateInfoEXT, InstanceCreateInfo},
     Entry,
 };
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use slog::Logger;
 
 pub use self::device::Device;
@@ -518,9 +518,9 @@ impl Display for VersionDisplayer<'_> {
     }
 }
 
-lazy_static! {
-    static ref LIBRARY: Entry = unsafe { Entry::load() }.unwrap();
-}
+static LIBRARY: Lazy<Entry> = Lazy::new(|| {
+    unsafe { Entry::load() }.expect("failed to load vulkan library")
+});
 
 unsafe extern "system" fn vulkan_debug_utils_callback(
     severity: ash::vk::DebugUtilsMessageSeverityFlagsEXT,
