@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![forbid(unsafe_op_in_unsafe_fn)]
 // Because this is an experiment for a future pull request.
 //#![warn(missing_docs)] // not as much yellow
 

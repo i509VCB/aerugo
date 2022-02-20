@@ -12,6 +12,57 @@ use super::{version::Version, LIBRARY, SMITHAY_VERSION};
 
 pub use self::error::*;
 
+/// Wrapper around [`ash::Instance`] to ensure an instance is only destroyed once all resources have been
+/// dropped.
+///
+/// This object also contains the [`version`](InstanceHandle::version) of the instance.
+pub struct InstanceHandle {
+    handle: ash::Instance,
+    version: Version,
+}
+
+impl InstanceHandle {
+    /// Returns a reference to the underlying [`ash::Instance`].
+    ///
+    /// # Safety
+    /// - Callers must NOT destroy the returned instance.
+    /// - Child objects created using the instance must not outlive the instance.
+    ///
+    /// These safety requirements may be checked by enabling validation layers.
+    pub unsafe fn raw(&self) -> &ash::Instance {
+        &self.handle
+    }
+
+    /// Returns the version of the instance.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+}
+
+impl fmt::Debug for InstanceHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InstanceHandle")
+            .field("version", &self.version)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for InstanceHandle {
+    fn drop(&mut self) {
+        // SAFETY: The Vulkan specification states the following requirements:
+        //
+        // > All child objects created using instance must have been destroyed prior to destroying instance.
+        // This first requirement is met since accessing the handle is unsafe, and callers must guarantee no
+        // child objects outlive the instance.
+        //
+        // > Host access to instance must be externally synchronized.
+        // Host access is externally synchronized since the InstanceHandle is given to users inside an Arc.
+        unsafe {
+            self.handle.destroy_instance(None);
+        }
+    }
+}
+
 /// A builder used to construct an [`Instance`].
 ///
 /// To instantiate, use [`Instance::builder`].
@@ -114,6 +165,7 @@ impl InstanceBuilder {
 
         let mut app_info = ApplicationInfo::builder()
             .api_version(self.api_version.to_raw())
+            // SAFETY: Vulkan requires a NUL terminated C string.
             .engine_name(unsafe { CStr::from_bytes_with_nul_unchecked(b"Smithay\0") })
             .engine_version(SMITHAY_VERSION.to_raw());
 
@@ -138,18 +190,18 @@ impl InstanceBuilder {
             .enabled_extension_names(&extension_ptrs[..]);
 
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }?;
-        let instance = Arc::new(InstanceInner {
-            instance,
+        let handle = Arc::new(InstanceHandle {
+            handle: instance,
             version: self.api_version,
         });
 
-        Ok(instance.into())
+        Ok(Instance(handle))
     }
 }
 
 /// A Vulkan instance which allows interfacing with the Vulkan APIs.
 #[derive(Debug)]
-pub struct Instance(pub(crate) Arc<InstanceInner>);
+pub struct Instance(pub(crate) Arc<InstanceHandle>);
 
 impl Instance {
     /// Returns the max Vulkan API version supported any created instances.
@@ -169,7 +221,7 @@ impl Instance {
             .enumerate_instance_layer_properties()?
             .into_iter()
             .map(|properties| {
-                // SAFETY: String is null terminated.
+                // SAFETY: Vulkan guarantees the string is null terminated.
                 let c_str = unsafe { CStr::from_ptr(&properties.layer_name as *const _) };
                 c_str.to_str().expect("Invalid UTF-8 in layer name").to_owned()
             });
@@ -183,7 +235,7 @@ impl Instance {
             .enumerate_instance_extension_properties()?
             .into_iter()
             .map(|properties| {
-                // SAFETY: String is null terminated.
+                // SAFETY: Vulkan guarantees the string is null terminated.
                 let c_str = unsafe { CStr::from_ptr(&properties.extension_name as *const _) };
                 c_str.to_str().expect("Invalid UTF-8 in extension name").to_owned()
             });
@@ -207,40 +259,12 @@ impl Instance {
         self.0.version
     }
 
-    /// Returns a raw handle to the underlying [`ash::Instance`].
+    /// Returns a handle to the underling [`ash::Instance`].
     ///
-    /// The returned handle may be used to access portions of the Vulkan API not in scope of the abstractions in this
-    /// module.
-    ///
-    /// # Safety
-    /// - The instance must not be destroyed.
-    /// - The caller must guarantee usage of the handle and any objects created using the instance do not exceed the
-    /// lifetime this instance.
-    pub unsafe fn handle(&self) -> ash::Instance {
-        self.0.instance.clone()
-    }
-}
-
-pub(crate) struct InstanceInner {
-    instance: ash::Instance,
-    version: Version,
-}
-
-impl fmt::Debug for InstanceInner {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("InstanceInner").field(&self.instance.handle()).finish()
-    }
-}
-
-impl From<Arc<InstanceInner>> for Instance {
-    fn from(inner: Arc<InstanceInner>) -> Self {
-        Instance(inner)
-    }
-}
-
-impl Drop for InstanceInner {
-    fn drop(&mut self) {
-        // SAFETY: Wrapping the inner instance in `Arc` ensures external synchronization per Vulkan specification.
-        unsafe { self.instance.destroy_instance(None) };
+    /// The Vulkan API enforces a strict lifetimes over objects that are created, meaning child objects
+    /// cannot outlive their instance. A great way to ensure the instance will live long enough is storing a
+    /// handle inside the container of child objects.
+    pub fn handle(&self) -> Arc<InstanceHandle> {
+        self.0.clone()
     }
 }

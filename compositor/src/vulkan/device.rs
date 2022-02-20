@@ -6,11 +6,57 @@ use std::{
 use ash::vk::{DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo};
 
 use super::{
-    instance::{InstanceError, InstanceInner},
+    instance::{InstanceError, InstanceHandle},
     physical_device::PhysicalDevice,
     queue::QueueFamily,
     Version,
 };
+
+pub struct DeviceHandle {
+    instance: Arc<InstanceHandle>,
+    device: ash::Device,
+    version: Version,
+    enabled_extensions: Vec<String>,
+}
+
+impl DeviceHandle {
+    /// Returns a reference to the underlying [`ash::Device`].
+    ///
+    /// # Safety
+    /// - Callers must NOT destroy the returned device.
+    /// - Child objects created using the device must not outlive the device.
+    ///
+    /// These safety requirements may be checked by enabling validation layers.
+    pub unsafe fn raw(&self) -> &ash::Device {
+        &self.device
+    }
+}
+
+impl fmt::Debug for DeviceHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceInner")
+            .field("version", &self.version)
+            .field("enabled_extensions", &self.enabled_extensions)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for DeviceHandle {
+    fn drop(&mut self) {
+        // TODO: The Vulkan specification suggests applications can use `vkDeviceWaitIdle` to ensure no work
+        // is active on the device before destroying it. Although this may block.
+
+        // SAFETY: The Vulkan specification states the following requirements:
+        //
+        // > All child objects created using device must have been destroyed prior to destroying device.
+        // This first requirement is met since accessing the handle is unsafe, and callers must guarantee no
+        // child objects outlive the device.
+        //
+        // > Host access to device must be externally synchronized.
+        // Host access is externally synchronized since the DeviceHandle is given to users inside an Arc.
+        unsafe { self.device.destroy_device(None) };
+    }
+}
 
 /// A builder used to construct a device.
 #[derive(Debug)]
@@ -64,7 +110,8 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
         self,
         extension: &mut T,
     ) -> Result<Device, InstanceError> {
-        self.build_impl(Some(extension))
+        // SAFETY: Caller guaranteed the extension structs are compliant.
+        unsafe { self.build_impl(Some(extension)) }
     }
 
     unsafe fn build_impl<E: ExtendsDeviceCreateInfo>(self, extension: Option<&mut E>) -> Result<Device, InstanceError> {
@@ -73,6 +120,9 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
         }
 
         let instance_handle = self.device.instance().handle();
+        // SAFETY: The Arc<InstanceHandle> stored in the device guarantees the device will not outlive the
+        // instance.
+        let raw_instance = unsafe { instance_handle.raw() };
 
         let queues = self
             .queues
@@ -98,9 +148,11 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
             create_info = create_info.enabled_features(features);
         }
 
-        let device = instance_handle.create_device(self.device.handle(), &create_info, None)?;
-        let inner = Arc::new(DeviceInner {
-            instance: self.device.instance().0.clone(),
+        // SAFETY: The Arc<InstanceHandle> stored in the device guarantees the device will not outlive the
+        // instance.
+        let device = unsafe { raw_instance.create_device(self.device.handle(), &create_info, None) }?;
+        let inner = Arc::new(DeviceHandle {
+            instance: instance_handle,
             device,
             version: self.device.version(),
             enabled_extensions: self.enable_extensions.clone(),
@@ -112,7 +164,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
 
 /// Represents a handle to an instantiated logical device.
 #[derive(Debug)]
-pub struct Device(Arc<DeviceInner>);
+pub struct Device(Arc<DeviceHandle>);
 
 impl Device {
     /// Returns a new builder used to construct a [`Device`].
@@ -146,33 +198,13 @@ impl Device {
 
     /// Returns a raw handle to the underlying [`ash::Device`].
     ///
-    /// The returned handle may be used to access portions of the Vulkan API not in scope of the abstractions in this
-    /// module.
+    /// The Vulkan API enforces a strict lifetimes over objects that are created, meaning child objects
+    /// cannot outlive their device. A great way to ensure the device will live long enough is storing a
+    /// handle inside the container of child objects.
     ///
-    /// # Safety
-    /// - The device must not be destroyed.
-    /// - The caller must guarantee usage of the handle and any objects created using the device do not exceed the
-    /// lifetime of the device.
-    pub unsafe fn handle(&self) -> ash::Device {
-        self.0.device.clone()
-    }
-}
-
-pub(crate) struct DeviceInner {
-    instance: Arc<InstanceInner>,
-    device: ash::Device,
-    version: Version,
-    enabled_extensions: Vec<String>,
-}
-
-impl fmt::Debug for DeviceInner {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("DeviceInner").field(&self.device.handle()).finish()
-    }
-}
-
-impl Drop for DeviceInner {
-    fn drop(&mut self) {
-        unsafe { self.device.destroy_device(None) };
+    /// Since a device is a child object of a [`Instance`], storing a handle also ensures child objects do not
+    /// outlive the instance.
+    pub fn handle(&self) -> Arc<DeviceHandle> {
+        self.0.clone()
     }
 }

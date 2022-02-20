@@ -25,12 +25,14 @@ pub struct PhysicalDevice<'i> {
 impl PhysicalDevice<'_> {
     /// Enumerates over the physical devices
     pub fn enumerate(instance: &Instance) -> Result<impl Iterator<Item = PhysicalDevice<'_>>, InstanceError> {
-        // SAFETY: Instance lifetime on PhysicalDevice ensures the Physical devices created using the handle and child
-        // objects do not outlive the instance.
-        Ok(unsafe { instance.handle().enumerate_physical_devices() }?
+        // SAFETY: The lifetime on PhysicalDevice ensures the Physical devices created using the handle do not
+        // outlive the instance.
+        let instance_handle = instance.handle();
+        let instance_handle = unsafe { instance_handle.raw() };
+
+        Ok(unsafe { instance_handle.enumerate_physical_devices() }?
             .into_iter()
             .map(|device| {
-                let instance_handle = unsafe { instance.handle() };
                 let features = unsafe { instance_handle.get_physical_device_features(device) };
 
                 let extensions = unsafe { instance_handle.enumerate_device_extension_properties(device) }?
@@ -80,10 +82,10 @@ impl PhysicalDevice<'_> {
     /// Enumerates over the available physical devices provided by the instance, selecting the device which corresponds
     /// to the DRM node.
     ///
-    /// This function will only find the desired device if the device supports the [VK_EXT_physical_device_drm]
+    /// This function will only find the desired device if the device supports the [`VK_EXT_physical_device_drm`]
     /// extension.
     ///
-    /// [VK_EXT_physical_device_drm]: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkPhysicalDeviceDrmPropertiesEXT.html
+    /// [`VK_EXT_physical_device_drm`]: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkPhysicalDeviceDrmPropertiesEXT.html
     pub fn with_drm_node(
         instance: &Instance,
         node: impl AsRef<DrmNode>,
@@ -94,8 +96,8 @@ impl PhysicalDevice<'_> {
             if device.supports_extension("VK_EXT_physical_device_drm") {
                 let node = node.as_ref();
 
-                // SAFETY: Physical device supports for VK_EXT_physical_device_drm
-                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle(), handle) };
+                // SAFETY: Physical device supports the VK_EXT_physical_device_drm extension.
+                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle().raw(), handle) };
 
                 match node.ty() {
                     NodeType::Primary if drm_properties.has_primary == ash::vk::TRUE => {
@@ -160,13 +162,15 @@ impl PhysicalDevice<'_> {
 
     /// Returns a raw handle to the underlying [`ash::vk::PhysicalDevice`].
     ///
-    /// The returned handle may be used to access portions of the Vulkan API not in scope of the abstractions in this
-    /// module.
+    /// The returned handle may be used to access portions of the Vulkan API not in scope of the abstractions
+    /// in this module.
+    ///
+    /// The data provided using this handle is only correct as long as the parent instance is alive.
     ///
     /// # Safety
     /// - The instance must not be destroyed.
-    /// - The caller must guarantee usage of the handle and any objects created using the physical device do not exceed
-    /// the lifetime which owns this physical device..
+    /// - The caller must guarantee the handle does not to outlive the instance (since the physical device is
+    /// immediately invalid once the instance is destroyed).
     pub unsafe fn handle(&self) -> ash::vk::PhysicalDevice {
         self.inner
     }

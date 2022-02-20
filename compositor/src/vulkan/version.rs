@@ -4,7 +4,7 @@ use std::{
 };
 
 /// A Vulkan API version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, Hash)]
 pub struct Version {
     /// The variant of the Vulkan API.
     ///
@@ -33,6 +33,9 @@ impl Version {
 
     /// Version 1.2 of the Vulkan API.
     pub const VERSION_1_2: Version = Version::from_raw(ash::vk::API_VERSION_1_2);
+
+    // TODO: Pending on ash to support version 1.3
+    //pub const VERSION_1_3: Version = Version::from_raw(ash::vk::API_VERSION_1_3);
 
     /// Converts a packed version into a version struct.
     pub const fn from_raw(raw: u32) -> Version {
