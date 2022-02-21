@@ -41,6 +41,8 @@ pub mod physical_device;
 pub mod queue;
 pub mod version;
 
+pub mod renderer;
+
 use ash::Entry;
 use once_cell::sync::Lazy;
 

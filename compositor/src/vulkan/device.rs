@@ -177,19 +177,20 @@ impl Device {
         }
     }
 
+    // TODO: Make this the created version, not max supported.
     /// Returns maximum the version of the API the device supports.
     pub fn version(&self) -> Version {
         self.0.version
     }
 
-    /// Returns a list of enabled extensions the device was created with.
+    /// Returns a list of the device's enabled extensions.
     ///
     /// Some parts of the Vulkan API may only be used if the corresponding extension is enabled on the device.
     pub fn enabled_extensions(&self) -> Vec<String> {
         self.0.enabled_extensions.clone()
     }
 
-    /// Returns true if one if the specified extension is enabled on the device.
+    /// Returns true if the specified extension is enabled for the device.
     ///
     /// Some parts of the Vulkan API may only be used if the corresponding extension is enabled on the device.
     pub fn is_extension_enabled(&self, extension: &str) -> bool {

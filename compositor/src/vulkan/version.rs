@@ -4,7 +4,7 @@ use std::{
 };
 
 /// A Vulkan API version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Version {
     /// The variant of the Vulkan API.
     ///
@@ -83,6 +83,8 @@ impl PartialOrd for Version {
         self.patch.partial_cmp(&other.patch)
     }
 }
+
+// TODO: Ord?
 
 #[derive(Debug)]
 struct VersionDisplayer<'a> {

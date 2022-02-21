@@ -18,9 +18,15 @@ The OpenGL renderer does not provide utilities to create shaders.
 
 Not sure whether the Vulkan renderer should.
 
+## Other
+
+If available (not core until 1.2), enable `VK_KHR_driver_properties` and print those in the log. Warn if it is not available.
+
 # `VulkanRenderer`
 
 ## Required extensions:
+- `VK_EXT_image_drm_format_modifier` (for querying valid drm format codes and modifiers).
+  - This is something nvidia will need to support in order for some things to work correctly.
 - `VK_EXT_external_memory_dma_buf`
 - `VK_KHR_external_memory_fd`
 

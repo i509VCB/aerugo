@@ -97,7 +97,7 @@ impl PhysicalDevice<'_> {
                 let node = node.as_ref();
 
                 // SAFETY: Physical device supports the VK_EXT_physical_device_drm extension.
-                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(&instance.handle().raw(), handle) };
+                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(instance.handle().raw(), handle) };
 
                 match node.ty() {
                     NodeType::Primary if drm_properties.has_primary == ash::vk::TRUE => {
