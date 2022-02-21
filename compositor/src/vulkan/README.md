@@ -1,7 +1,3 @@
-Some notes regarding what needs to be done in the Vulkan abstractions:
-
-2. Shader compilation and loading.
-
 ## Device enumeration
 
 We do support using `VK_EXT_physical_device_drm` to get a physical device from a DRM node.
