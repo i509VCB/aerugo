@@ -16,9 +16,12 @@ pub use self::error::*;
 
 pub struct DeviceHandle {
     device: ash::Device,
+    pub(crate) physical: ash::vk::PhysicalDevice,
+    queue_family_index: usize,
+    queue: ash::vk::Queue,
     version: Version,
     enabled_extensions: Vec<String>,
-    instance: Arc<InstanceHandle>,
+    pub(crate) instance: Arc<InstanceHandle>,
 }
 
 impl DeviceHandle {
@@ -31,6 +34,14 @@ impl DeviceHandle {
     /// These safety requirements may be checked by enabling validation layers.
     pub unsafe fn raw(&self) -> &ash::Device {
         &self.device
+    }
+
+    pub unsafe fn queue(&self) -> &ash::vk::Queue {
+        &self.queue
+    }
+
+    pub fn queue_family_index(&self) -> usize {
+        self.queue_family_index
     }
 }
 
@@ -157,11 +168,18 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
         // instance.
         let device =
             unsafe { raw_instance.create_device(self.device.handle(), &create_info, None) }.map_err(VkError::from)?;
+
+        // Now create the queue
+        let queue = unsafe { device.get_device_queue(queue_family_index as u32, 0) };
+
         let inner = Arc::new(DeviceHandle {
-            instance: instance_handle,
             device,
+            physical: unsafe { self.device.handle() },
+            queue_family_index,
+            queue,
             version: self.device.version(),
             enabled_extensions: self.enable_extensions.clone(),
+            instance: instance_handle,
         });
 
         Ok(Device(inner))
@@ -182,8 +200,10 @@ impl Device {
         }
     }
 
-    // TODO: Make this the created version, not max supported.
     /// Returns maximum the version of the API the device supports.
+    ///
+    /// This will be the lower of the physical device's maximum supported version and the specified version of
+    /// the instance.
     pub fn version(&self) -> Version {
         self.0.version
     }
@@ -223,5 +243,9 @@ impl Device {
     /// These safety requirements may be checked by enabling validation layers.
     pub unsafe fn raw(&self) -> &ash::Device {
         unsafe { self.0.raw() }
+    }
+
+    pub fn queue_family_index(&self) -> usize {
+        self.0.queue_family_index()
     }
 }

@@ -58,17 +58,9 @@ impl PhysicalDevice<'_> {
                 let supports_driver_info = {
                     // Promoted to core in 1.2, so all implementations must have it.
                     let mut supported = instance.version() >= Version::VERSION_1_2;
-
-                    // Otherwise the driver must support `VK_KHR_get_physical_device_properties2`, which has
-                    // been promoted to core in 1.1
-                    let supports_properties2 = instance.version() >= Version::VERSION_1_1
-                        || extensions.iter().any(|e| e == "VK_KHR_get_physical_device_properties2");
-
-                    // And if the properties2 is supported, then `VK_KHR_driver_properties` must be supported.
-                    if supports_properties2 {
-                        supported |= extensions.iter().any(|e| e == "VK_KHR_driver_properties");
-                    }
-
+                    // Otherwise the instance must have enabled `VK_KHR_get_physical_device_properties2`,
+                    // which has been promoted to core in 1.1
+                    supported |= extensions.iter().any(|e| e == "VK_KHR_driver_properties");
                     supported
                 };
 
@@ -164,24 +156,27 @@ impl PhysicalDevice<'_> {
     }
 
     /// Returns the highest version of the Vulkan API the physical device supports.
+    ///
+    /// This will be the lower of the physical device's maximum supported version and the specified version of
+    /// the instance.
     pub fn version(&self) -> Version {
         Version::from_raw(self.properties.api_version)
     }
 
-    /// Returns a list of extensions this device supports.
+    /// Returns a list of device extensions this device supports.
     pub fn supported_extensions(&self) -> Vec<String> {
         self.extensions.clone()
     }
 
-    /// Returns true if the device supports the specified extension.
+    /// Returns true if the device supports the specified device extension.
     pub fn supports_extension(&self, extension: &str) -> bool {
         self.extensions.iter().any(|supported| supported == extension)
     }
 
     /// Returns info about the Vulkan driver.
     ///
-    /// This may return [`None`] if the Vulkan driver implementation does does not supply Vulkan 1.2 or
-    /// support the `VK_KHR_driver_properties` extension.
+    /// This may return [`None`] if the Vulkan instance has not enabled the `VK_KHR_driver_properties`
+    /// instance extension.
     pub fn driver(&self) -> Option<DriverInfo> {
         self.driver.clone()
     }

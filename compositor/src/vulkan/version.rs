@@ -51,15 +51,15 @@ impl Version {
     pub const fn to_raw(self) -> u32 {
         ash::vk::make_api_version(self.variant, self.major, self.minor, self.patch)
     }
+}
 
-    /// Returns an object which implements [`Display`] that may be used to display a version.
-    ///
-    /// The `display_variant` parameter states whether the [`Version::variant`] should be displayed.
-    pub fn display(&self, display_variant: bool) -> impl Display + '_ {
-        VersionDisplayer {
-            version: self,
-            variant: display_variant,
-        }
+impl Display for Version {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{} variant {}",
+            self.major, self.minor, self.patch, self.variant
+        )
     }
 }
 
@@ -85,28 +85,6 @@ impl PartialOrd for Version {
 }
 
 // TODO: Ord?
-
-#[derive(Debug)]
-struct VersionDisplayer<'a> {
-    version: &'a Version,
-    variant: bool,
-}
-
-impl Display for VersionDisplayer<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}.{}.{}",
-            self.version.major, self.version.minor, self.version.patch
-        )?;
-
-        if self.variant {
-            write!(f, " variant {}", self.version.variant)?;
-        }
-
-        Ok(())
-    }
-}
 
 #[cfg(test)]
 mod test {

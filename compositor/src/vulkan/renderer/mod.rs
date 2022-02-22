@@ -1,7 +1,9 @@
+mod format;
 mod render_pass;
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, slice};
 
+use ash::vk::{CommandPoolCreateInfo, self, CommandBufferAllocateInfo, DrmFormatModifierPropertiesListEXT};
 use smithay::{
     backend::{
         allocator::{self, dmabuf::Dmabuf},
@@ -14,11 +16,14 @@ use smithay::{
 
 use super::{
     device::{Device, DeviceHandle},
-    version::Version,
+    version::Version, error::VkError,
 };
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+pub enum Error {
+    #[error(transparent)]
+    Vk(#[from] VkError)
+}
 
 #[derive(Debug)]
 pub struct VulkanTexture {}
@@ -78,6 +83,8 @@ impl Frame for VulkanFrame {
 
 #[derive(Debug)]
 pub struct VulkanRenderer {
+    command_buffer: vk::CommandBuffer,
+    command_pool: vk::CommandPool,
     /// The device handle.
     ///
     /// Since a vulkan renderer owns some vulkan objects, we need this handle to ensure objects do not outlive
@@ -86,32 +93,108 @@ pub struct VulkanRenderer {
 }
 
 impl VulkanRenderer {
-    /// Returns a list of extensions the device enable to use a [`VulkanRenderer`].
-    pub const fn required_extensions(version: Version) -> Result<&'static [&'static str], ()> {
-        match version {
-            Version::VERSION_1_0 => todo!(),
-            Version::VERSION_1_1 => todo!(),
-            Version::VERSION_1_2 => todo!(),
-
-            _ => Err(()),
+    /// Returns a list of device extensions the device must enable to use a [`VulkanRenderer`].
+    pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], ()> {
+        if version >= Version::VERSION_1_2 {
+            Ok(&[
+                "VK_KHR_external_memory_fd",
+                "VK_EXT_external_memory_dma_buf",
+                "VK_EXT_image_drm_format_modifier",
+            ])
+        } else if version >= Version::VERSION_1_1 {
+            Ok(&[
+                "VK_KHR_external_memory_fd",
+                "VK_EXT_external_memory_dma_buf",
+                "VK_EXT_image_drm_format_modifier",
+                // Promoted in Vulkan 1.2
+                "VK_KHR_image_format_list", 
+            ])
+        } else {
+            Err(())
         }
     }
 
     // TODO: There may be some required device capabilities?
 
-    pub fn new(device: &Device) -> Result<VulkanRenderer, ()> {
+    pub fn new(device: &Device) -> Result<VulkanRenderer, Error> {
         // Verify the required extensions are supported.
         let version = device.version();
 
-        if !Self::required_extensions(version)
-            .expect("TODO Error type")
+        if !Self::required_device_extensions(version)
+            .expect("TODO Error type no version")
             .iter()
             .all(|extension| device.is_extension_enabled(extension))
         {
             todo!("Missing required extensions error")
         }
 
-        todo!()
+        // Create the command pool for Vulkan
+        let pool_info = CommandPoolCreateInfo::builder()
+            .queue_family_index(device.queue_family_index() as u32);
+
+        let device = device.handle();
+        let raw_device = unsafe { device.raw() };
+
+        let command_pool = unsafe { raw_device.create_command_pool(&pool_info, None) }
+            .map_err(VkError::from)?;
+
+        // Create the command buffers
+        let command_buffer_info = CommandBufferAllocateInfo::builder()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let command_buffer = unsafe { raw_device.allocate_command_buffers(&command_buffer_info) }
+            .map_err(VkError::from)?
+            .into_iter()
+            .next()
+            .unwrap();
+
+        // Build the list of valid dmabuf formats
+        let dmabuf_formats = {
+            let instance = unsafe { device.instance.raw() };
+
+            // First query how many entries the .
+            let mut formats = DrmFormatModifierPropertiesListEXT::builder();
+            let mut properties2 = vk::FormatProperties2::builder()
+                .push_next(&mut formats);
+
+            // SAFETY: VK_EXT_image_drm_format_modifier is enabled
+            // Null pointer for pDrmFormatModifierProperties is safe when obtaining count.
+            unsafe { instance.get_physical_device_format_properties2(device.physical, vk::Format::UNDEFINED, &mut properties2) };
+
+            // Manual lifetime fighting
+            drop(properties2);
+            let count = formats.drm_format_modifier_count as usize;
+
+            drop(formats);
+            let mut vec = Vec::with_capacity(count);
+
+            // Now get the properties
+            let mut formats = DrmFormatModifierPropertiesListEXT::builder()
+                .drm_format_modifier_properties(&mut vec[..]);
+            let mut properties2 = vk::FormatProperties2::builder()
+                .push_next(&mut formats);
+
+            // SAFETY: Implementation will only write the specified number of modifiers in the count, and the vec has that capacity.
+            unsafe { instance.get_physical_device_format_properties2(device.physical, vk::Format::UNDEFINED, &mut properties2) };
+            drop(properties2);
+            // SAFETY: Elements from 0..count were just initialized.
+            unsafe { vec.set_len(count) };
+
+            let modifiers = vec.iter().map(|properties| {
+                allocator::Modifier::from(properties.drm_format_modifier)
+            }).collect::<Vec<_>>();
+
+            println!("{:#?}", vec);
+            println!("{:#?}", modifiers);
+        };
+ 
+        Ok(VulkanRenderer {
+            command_buffer,
+            command_pool,
+            device,
+        })
     }
 
     pub fn device(&self) -> Arc<DeviceHandle> {
@@ -190,6 +273,15 @@ impl ImportShm for VulkanRenderer {
 
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
-        // TODO
+        let raw = unsafe { self.device.raw() };
+
+        // Destruction of objects must happen in the opposite order they are created.
+        unsafe {
+            // Command buffers are created by a command pool.
+            raw.free_command_buffers(self.command_pool, &[self.command_buffer]);
+            raw.destroy_command_pool(self.command_pool, None);
+        }
+
+        // Finally, we let the implicit drop of `Arc<DeviceHandle>` free the device if no other handles exist.
     }
 }

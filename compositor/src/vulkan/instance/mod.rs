@@ -19,6 +19,7 @@ pub use self::error::*;
 pub struct InstanceHandle {
     handle: ash::Instance,
     version: Version,
+    enabled_extensions: Vec<String>,
 }
 
 impl InstanceHandle {
@@ -36,6 +37,16 @@ impl InstanceHandle {
     /// Returns the version of the instance.
     pub fn version(&self) -> Version {
         self.version
+    }
+
+    /// Returns a list of enabled instance extensions for this instance.
+    pub fn enabled_extensions(&self) -> Vec<String> {
+        self.enabled_extensions.clone()
+    }
+
+    /// Returns true if the specified instance extension is enabled.
+    pub fn is_extension_enabled(&self, extension: &str) -> bool {
+        self.enabled_extensions.iter().any(|supported| supported == extension)
     }
 }
 
@@ -78,9 +89,11 @@ pub struct InstanceBuilder {
 impl InstanceBuilder {
     /// Sets the API version that should be used when creating an instance.
     ///
-    /// The default value is [`Version::VERSION_1_0`].
+    /// The default value is [`Version::VERSION_1_1`].
     ///
     /// You should ensure the version you are requesting is supported using [`Instance::max_instance_version`].
+    ///
+    /// Note that Smithay requires at least Vulkan 1.1.
     pub fn api_version(mut self, version: Version) -> InstanceBuilder {
         self.api_version = version;
         self
@@ -119,6 +132,11 @@ impl InstanceBuilder {
 
     /// Creates an instance using this builder.
     pub fn build(self) -> Result<Instance, InstanceError> {
+        // We require at least Vulkan 1.1
+        if self.api_version < Version::VERSION_1_1 {
+            return Err(InstanceError::UnsupportedVulkanVersion(self.api_version));
+        }
+
         // Check if the requested extensions and layers are supported.
         let supported_layers = Instance::enumerate_layers()?.collect::<Vec<_>>();
         let supported_extensions = Instance::enumerate_extensions()?.collect::<Vec<_>>();
@@ -193,6 +211,7 @@ impl InstanceBuilder {
         let handle = Arc::new(InstanceHandle {
             handle: instance,
             version: self.api_version,
+            enabled_extensions: self.enable_extensions,
         });
 
         Ok(Instance(handle))
@@ -205,10 +224,9 @@ pub struct Instance(pub(crate) Arc<InstanceHandle>);
 
 impl Instance {
     /// Returns the max Vulkan API version supported any created instances.
-    pub fn max_instance_version() -> Result<Version, InstanceError> {
+    pub fn max_instance_version() -> Result<Version, VkError> {
         let version = LIBRARY
-            .try_enumerate_instance_version()
-            .map_err(VkError::from)?
+            .try_enumerate_instance_version()?
             .map(Version::from_raw)
             // Vulkan 1.0 does not have `vkEnumerateInstanceVersion`.
             .unwrap_or(Version::VERSION_1_0);
@@ -217,10 +235,9 @@ impl Instance {
     }
 
     /// Enumerates over the available instance layers on the system.
-    pub fn enumerate_layers() -> Result<impl Iterator<Item = String>, InstanceError> {
+    pub fn enumerate_layers() -> Result<impl Iterator<Item = String>, VkError> {
         let layers = LIBRARY
-            .enumerate_instance_layer_properties()
-            .map_err(VkError::from)?
+            .enumerate_instance_layer_properties()?
             .into_iter()
             .map(|properties| {
                 // SAFETY: Vulkan guarantees the string is null terminated.
@@ -232,10 +249,9 @@ impl Instance {
     }
 
     /// Enumerates over the available instance layers on the system.
-    pub fn enumerate_extensions() -> Result<impl Iterator<Item = String>, InstanceError> {
+    pub fn enumerate_extensions() -> Result<impl Iterator<Item = String>, VkError> {
         let extensions = LIBRARY
-            .enumerate_instance_extension_properties()
-            .map_err(VkError::from)?
+            .enumerate_instance_extension_properties()?
             .into_iter()
             .map(|properties| {
                 // SAFETY: Vulkan guarantees the string is null terminated.
@@ -249,7 +265,7 @@ impl Instance {
     /// Returns a builder that may be used to create an instance
     pub fn builder() -> InstanceBuilder {
         InstanceBuilder {
-            api_version: Version::VERSION_1_0,
+            api_version: Version::VERSION_1_1,
             enable_extensions: vec![],
             enable_layers: vec![],
             app_name: None,
@@ -260,6 +276,16 @@ impl Instance {
     /// Returns the version of the API the instance has been created with.
     pub fn version(&self) -> Version {
         self.0.version
+    }
+
+    /// Returns a list of enabled instance extensions for this instance.
+    pub fn enabled_extensions(&self) -> Vec<String> {
+        self.0.enabled_extensions()
+    }
+
+    /// Returns true if the specified instance extension is enabled.
+    pub fn is_extension_enabled(&self, extension: &str) -> bool {
+        self.0.is_extension_enabled(extension)
     }
 
     /// Returns a handle to the underling [`ash::Instance`].

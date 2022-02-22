@@ -75,7 +75,7 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 mod test {
     use std::error::Error;
 
-    use crate::vulkan::{device::Device, version::Version};
+    use crate::vulkan::{device::Device, version::Version, renderer::VulkanRenderer};
 
     use super::{instance::Instance, physical_device::PhysicalDevice, VALIDATION_LAYER_NAME};
 
@@ -101,11 +101,7 @@ mod test {
             .next()
             .expect("No device supports physical device drm");
 
-        println!(
-            "{} supporting version: {}",
-            physical.name(),
-            physical.version().display(true)
-        );
+        println!("{} supporting version: {}", physical.name(), physical.version());
 
         if let Some(driver) = physical.driver() {
             println!("Driver info:");
@@ -117,7 +113,19 @@ mod test {
             println!("No driver info");
         }
 
-        let _device = Device::builder(&physical).build()?;
+        let mut device_builder = Device::builder(&physical);
+        let req_extensions = VulkanRenderer::required_device_extensions(Version::VERSION_1_1).unwrap();
+
+        for extension in req_extensions {
+            device_builder = device_builder.extension(*extension);
+        }
+
+        let device = device_builder.build()?;
+
+        let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
+
+        drop(device);
+        drop(instance);
 
         Ok(())
     }
