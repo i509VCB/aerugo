@@ -176,6 +176,9 @@ impl VulkanRenderer {
             let mut properties2 = vk::FormatProperties2::builder()
                 .push_next(&mut formats);
 
+
+            // QUESTION: ANV returns nothing with UNDEFINED, but radv returns some formats
+
             // SAFETY: Implementation will only write the specified number of modifiers in the count, and the vec has that capacity.
             unsafe { instance.get_physical_device_format_properties2(device.physical, vk::Format::UNDEFINED, &mut properties2) };
             drop(properties2);
