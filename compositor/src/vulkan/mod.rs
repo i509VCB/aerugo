@@ -36,9 +36,9 @@
 //! [^validation]: [`VALIDATION_LAYER_NAME`]
 
 pub mod device;
+pub mod error;
 pub mod instance;
 pub mod physical_device;
-pub mod queue;
 pub mod version;
 
 pub mod renderer;
@@ -75,7 +75,7 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 mod test {
     use std::error::Error;
 
-    use crate::vulkan::device::Device;
+    use crate::vulkan::{device::Device, version::Version};
 
     use super::{instance::Instance, physical_device::PhysicalDevice, VALIDATION_LAYER_NAME};
 
@@ -88,6 +88,7 @@ mod test {
     fn instance_with_layer() -> Result<(), Box<dyn Error>> {
         let instance = Instance::builder()
             .layer(VALIDATION_LAYER_NAME)
+            .api_version(Version::VERSION_1_1)
             .build()
             .expect("Failed to create instance");
 
@@ -106,16 +107,17 @@ mod test {
             physical.version().display(true)
         );
 
-        for (index, family) in physical.queue_families().enumerate() {
-            println!("Queue Family {} {{", index);
-            println!("\tcount: {}", family.queue_count());
-            println!("\tflags: {:?}", family.flags());
-            println!("}}");
+        if let Some(driver) = physical.driver() {
+            println!("Driver info:");
+            println!("\tname: {}", driver.name);
+            println!("\tinfo: {}", driver.info);
+            println!("\tid: {:?}", driver.id);
+            println!("\tconformance: {:?}", driver.conformance)
+        } else {
+            println!("No driver info");
         }
 
-        let _device = Device::builder(&physical)
-            .create_queue(&physical.queue_families().next().unwrap())
-            .build()?;
+        let _device = Device::builder(&physical).build()?;
 
         Ok(())
     }

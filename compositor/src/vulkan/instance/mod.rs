@@ -8,7 +8,7 @@ use std::{
 
 use ash::vk::{ApplicationInfo, InstanceCreateInfo};
 
-use super::{version::Version, LIBRARY, SMITHAY_VERSION};
+use super::{error::VkError, version::Version, LIBRARY, SMITHAY_VERSION};
 
 pub use self::error::*;
 
@@ -189,7 +189,7 @@ impl InstanceBuilder {
             .enabled_layer_names(&layer_ptrs[..])
             .enabled_extension_names(&extension_ptrs[..]);
 
-        let instance = unsafe { LIBRARY.create_instance(&create_info, None) }?;
+        let instance = unsafe { LIBRARY.create_instance(&create_info, None) }.map_err(VkError::from)?;
         let handle = Arc::new(InstanceHandle {
             handle: instance,
             version: self.api_version,
@@ -207,7 +207,8 @@ impl Instance {
     /// Returns the max Vulkan API version supported any created instances.
     pub fn max_instance_version() -> Result<Version, InstanceError> {
         let version = LIBRARY
-            .try_enumerate_instance_version()?
+            .try_enumerate_instance_version()
+            .map_err(VkError::from)?
             .map(Version::from_raw)
             // Vulkan 1.0 does not have `vkEnumerateInstanceVersion`.
             .unwrap_or(Version::VERSION_1_0);
@@ -218,7 +219,8 @@ impl Instance {
     /// Enumerates over the available instance layers on the system.
     pub fn enumerate_layers() -> Result<impl Iterator<Item = String>, InstanceError> {
         let layers = LIBRARY
-            .enumerate_instance_layer_properties()?
+            .enumerate_instance_layer_properties()
+            .map_err(VkError::from)?
             .into_iter()
             .map(|properties| {
                 // SAFETY: Vulkan guarantees the string is null terminated.
@@ -232,7 +234,8 @@ impl Instance {
     /// Enumerates over the available instance layers on the system.
     pub fn enumerate_extensions() -> Result<impl Iterator<Item = String>, InstanceError> {
         let extensions = LIBRARY
-            .enumerate_instance_extension_properties()?
+            .enumerate_instance_extension_properties()
+            .map_err(VkError::from)?
             .into_iter()
             .map(|properties| {
                 // SAFETY: Vulkan guarantees the string is null terminated.
@@ -266,5 +269,16 @@ impl Instance {
     /// handle inside the container of child objects.
     pub fn handle(&self) -> Arc<InstanceHandle> {
         self.0.clone()
+    }
+
+    /// Returns a reference to the underlying [`ash::Instance`].
+    ///
+    /// # Safety
+    /// - Callers must NOT destroy the returned instance.
+    /// - Child objects created using the instance must not outlive the instance.
+    ///
+    /// These safety requirements may be checked by enabling validation layers.
+    pub unsafe fn raw(&self) -> &ash::Instance {
+        unsafe { self.0.raw() }
     }
 }

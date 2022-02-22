@@ -1,11 +1,14 @@
 use std::ffi::CStr;
 
-use ash::extensions::ext::PhysicalDeviceDrm;
+use ash::{
+    extensions::ext::PhysicalDeviceDrm,
+    vk::{self, PhysicalDeviceDriverProperties, PhysicalDeviceProperties2},
+};
 use smithay::backend::drm::{DrmNode, NodeType};
 
 use super::{
+    error::VkError,
     instance::{Instance, InstanceError},
-    queue::QueueFamily,
     Version,
 };
 
@@ -14,28 +17,28 @@ use super::{
 pub struct PhysicalDevice<'i> {
     instance: &'i Instance,
     inner: ash::vk::PhysicalDevice,
+
     /* Some pre fetched fields that are useful during enumeration */
     name: String,
+    driver: Option<DriverInfo>,
     properties: ash::vk::PhysicalDeviceProperties,
     features: ash::vk::PhysicalDeviceFeatures,
     extensions: Vec<String>,
-    queue_families: Vec<QueueFamily>,
 }
 
 impl PhysicalDevice<'_> {
     /// Enumerates over the physical devices
-    pub fn enumerate(instance: &Instance) -> Result<impl Iterator<Item = PhysicalDevice<'_>>, InstanceError> {
+    pub fn enumerate(instance: &Instance) -> Result<impl Iterator<Item = PhysicalDevice<'_>>, VkError> {
         // SAFETY: The lifetime on PhysicalDevice ensures the Physical devices created using the handle do not
         // outlive the instance.
-        let instance_handle = instance.handle();
-        let instance_handle = unsafe { instance_handle.raw() };
+        let raw_instance = unsafe { instance.raw() };
 
-        Ok(unsafe { instance_handle.enumerate_physical_devices() }?
+        Ok(unsafe { raw_instance.enumerate_physical_devices() }?
             .into_iter()
             .map(|device| {
-                let features = unsafe { instance_handle.get_physical_device_features(device) };
+                let features = unsafe { raw_instance.get_physical_device_features(device) };
 
-                let extensions = unsafe { instance_handle.enumerate_device_extension_properties(device) }?
+                let extensions = unsafe { raw_instance.enumerate_device_extension_properties(device) }?
                     .iter()
                     .map(|extension| {
                         let name = unsafe { CStr::from_ptr(&extension.extension_name as *const _) };
@@ -43,23 +46,55 @@ impl PhysicalDevice<'_> {
                             .expect("Invalid UTF-8 in Vulkan extension name")
                             .to_owned()
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
 
-                let properties = unsafe { instance_handle.get_physical_device_properties(device) };
+                let properties = unsafe { raw_instance.get_physical_device_properties(device) };
 
                 let name = unsafe { CStr::from_ptr(&properties.device_name as *const _) }
                     .to_str()
                     .expect("Invalid UTF-8 in Vulkan extension name")
                     .to_owned();
 
-                let queue_families = unsafe { instance_handle.get_physical_device_queue_family_properties(device) }
-                    .iter()
-                    .enumerate()
-                    .map(|(index, properties)| QueueFamily {
-                        inner: *properties,
-                        index,
+                let supports_driver_info = {
+                    // Promoted to core in 1.2, so all implementations must have it.
+                    let mut supported = instance.version() >= Version::VERSION_1_2;
+
+                    // Otherwise the driver must support `VK_KHR_get_physical_device_properties2`, which has
+                    // been promoted to core in 1.1
+                    let supports_properties2 = instance.version() >= Version::VERSION_1_1
+                        || extensions.iter().any(|e| e == "VK_KHR_get_physical_device_properties2");
+
+                    // And if the properties2 is supported, then `VK_KHR_driver_properties` must be supported.
+                    if supports_properties2 {
+                        supported |= extensions.iter().any(|e| e == "VK_KHR_driver_properties");
+                    }
+
+                    supported
+                };
+
+                // Promoted to core in >= 1.2
+                let driver = if supports_driver_info {
+                    let mut driver_properties = PhysicalDeviceDriverProperties::default();
+                    let mut properties = PhysicalDeviceProperties2::builder().push_next(&mut driver_properties);
+
+                    // SAFETY: The Vulkan version is high enough or the required extensions are supported.
+                    unsafe { raw_instance.get_physical_device_properties2(device, &mut properties) };
+
+                    // SAFETY: Vulkan specification guarantees both strings are null-terminated UTF-8
+                    let driver_name = unsafe { CStr::from_ptr(&driver_properties.driver_name as *const _) };
+                    let driver_info = unsafe { CStr::from_ptr(&driver_properties.driver_info as *const _) };
+                    let driver_name = driver_name.to_str().unwrap().to_owned();
+                    let driver_info = driver_info.to_str().unwrap().to_owned();
+
+                    Some(DriverInfo {
+                        id: driver_properties.driver_id,
+                        name: driver_name,
+                        info: driver_info,
+                        conformance: driver_properties.conformance_version,
                     })
-                    .collect::<Vec<_>>();
+                } else {
+                    None
+                };
 
                 Ok(PhysicalDevice {
                     instance,
@@ -67,13 +102,13 @@ impl PhysicalDevice<'_> {
 
                     // Some pre fetched fields that are useful during enumeration
                     name,
+                    driver,
                     properties,
                     features,
                     extensions,
-                    queue_families,
                 })
             })
-            .collect::<Result<Vec<_>, InstanceError>>()?
+            .collect::<Result<Vec<_>, VkError>>()?
             .into_iter())
     }
 
@@ -97,7 +132,7 @@ impl PhysicalDevice<'_> {
                 let node = node.as_ref();
 
                 // SAFETY: Physical device supports the VK_EXT_physical_device_drm extension.
-                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(instance.handle().raw(), handle) };
+                let drm_properties = unsafe { PhysicalDeviceDrm::get_properties(instance.raw(), handle) };
 
                 match node.ty() {
                     NodeType::Primary if drm_properties.has_primary == ash::vk::TRUE => {
@@ -143,6 +178,14 @@ impl PhysicalDevice<'_> {
         self.extensions.iter().any(|supported| supported == extension)
     }
 
+    /// Returns info about the Vulkan driver.
+    ///
+    /// This may return [`None`] if the Vulkan driver implementation does does not supply Vulkan 1.2 or
+    /// support the `VK_KHR_driver_properties` extension.
+    pub fn driver(&self) -> Option<DriverInfo> {
+        self.driver.clone()
+    }
+
     /// Returns some properties about the physical device.
     pub fn properties(&self) -> ash::vk::PhysicalDeviceProperties {
         self.properties
@@ -153,11 +196,6 @@ impl PhysicalDevice<'_> {
     /// Checking if any additional features are supported may be done using [`ash::vk::PhysicalDeviceFeatures2`].  
     pub fn features(&self) -> ash::vk::PhysicalDeviceFeatures {
         self.features
-    }
-
-    /// Returns an iterator over the queue families of the device.
-    pub fn queue_families(&self) -> impl Iterator<Item = QueueFamily> + '_ {
-        self.queue_families.iter().copied()
     }
 
     /// Returns a raw handle to the underlying [`ash::vk::PhysicalDevice`].
@@ -174,4 +212,22 @@ impl PhysicalDevice<'_> {
     pub unsafe fn handle(&self) -> ash::vk::PhysicalDevice {
         self.inner
     }
+}
+
+/// Description of a Vulkan driver.
+#[derive(Debug, Clone)]
+pub struct DriverInfo {
+    /// ID which identifies the driver.
+    pub id: vk::DriverId,
+
+    /// The name of the driver.
+    pub name: String,
+
+    /// Information describing the driver.
+    ///
+    /// This may include information such as the version.
+    pub info: String,
+
+    /// The Vulkan conformance test this driver is conformant against.
+    pub conformance: vk::ConformanceVersion,
 }

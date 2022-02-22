@@ -107,3 +107,15 @@ impl Display for VersionDisplayer<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::vulkan::version::Version;
+
+    #[test]
+    fn test_cmp() {
+        assert!(Version::VERSION_1_1 > Version::VERSION_1_0);
+        assert!(Version::VERSION_1_2 > Version::VERSION_1_0);
+        assert!(Version::VERSION_1_1 < Version::VERSION_1_2);
+    }
+}

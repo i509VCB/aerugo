@@ -1,22 +1,24 @@
+mod error;
+
 use std::{
+    ffi::CString,
     fmt::{self, Formatter},
     sync::Arc,
 };
 
-use ash::vk::{DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo};
-
-use super::{
-    instance::{InstanceError, InstanceHandle},
-    physical_device::PhysicalDevice,
-    queue::QueueFamily,
-    Version,
+use ash::vk::{
+    DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo, QueueFlags,
 };
 
+use super::{error::VkError, instance::InstanceHandle, physical_device::PhysicalDevice, Version};
+
+pub use self::error::*;
+
 pub struct DeviceHandle {
-    instance: Arc<InstanceHandle>,
     device: ash::Device,
     version: Version,
     enabled_extensions: Vec<String>,
+    instance: Arc<InstanceHandle>,
 }
 
 impl DeviceHandle {
@@ -62,7 +64,6 @@ impl Drop for DeviceHandle {
 #[derive(Debug)]
 pub struct DeviceBuilder<'i, 'p> {
     device: &'p PhysicalDevice<'i>,
-    queues: Vec<QueueFamily>,
     enable_extensions: Vec<String>,
     features: Option<ash::vk::PhysicalDeviceFeatures>,
 }
@@ -78,14 +79,6 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
         self
     }
 
-    /// Indicates to Vulkan to create the queues for the queue family.
-    ///
-    /// In order for device creation to be successful, at least one queue must be created.
-    pub fn create_queue(mut self, queue_family: &QueueFamily) -> Self {
-        self.queues.push(*queue_family);
-        self
-    }
-
     /// The default features to enable when creating the device.
     pub fn features(mut self, features: ash::vk::PhysicalDeviceFeatures) -> Self {
         self.features = Some(features);
@@ -93,7 +86,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     }
 
     /// Returns a new device using the parameters passed into the builder.
-    pub fn build(self) -> Result<Device, InstanceError> {
+    pub fn build(self) -> Result<Device, DeviceError> {
         // Use DevicePrivateDataCreateInfoEXT as a dummy generic for monomorphization.
         unsafe { self.build_impl::<DevicePrivateDataCreateInfoEXT>(None) }
     }
@@ -109,36 +102,48 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     pub unsafe fn build_with_extension<T: ExtendsDeviceCreateInfo>(
         self,
         extension: &mut T,
-    ) -> Result<Device, InstanceError> {
+    ) -> Result<Device, DeviceError> {
         // SAFETY: Caller guaranteed the extension structs are compliant.
         unsafe { self.build_impl(Some(extension)) }
     }
 
-    unsafe fn build_impl<E: ExtendsDeviceCreateInfo>(self, extension: Option<&mut E>) -> Result<Device, InstanceError> {
-        if self.queues.is_empty() {
-            todo!("Error, no queues")
-        }
-
+    unsafe fn build_impl<E: ExtendsDeviceCreateInfo>(self, extension: Option<&mut E>) -> Result<Device, DeviceError> {
         let instance_handle = self.device.instance().handle();
         // SAFETY: The Arc<InstanceHandle> stored in the device guarantees the device will not outlive the
         // instance.
         let raw_instance = unsafe { instance_handle.raw() };
 
-        let queues = self
-            .queues
-            .iter()
-            .map(|queue| {
-                DeviceQueueCreateInfo {
-                    queue_family_index: queue.index as u32,
-                    queue_count: 1,
-                    // TODO: Multi queue priorities?
-                    p_queue_priorities: [1.0f32].as_ptr(),
-                    ..Default::default()
-                }
-            })
-            .collect::<Vec<_>>();
+        // Select an appropriate queue.
+        //
+        // For the time being, we do not support the user selecting queues on their own. This is probably something we
+        // want to change for the future.
+        let queue_families = unsafe { raw_instance.get_physical_device_queue_family_properties(self.device.handle()) };
 
-        let mut create_info = DeviceCreateInfo::builder().queue_create_infos(&queues[..]);
+        // Per the Vulkan specification, if the capabilities include graphics, the queue MUST also support
+        // transfer operations.
+        // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VkQueueFlags
+        let (queue_family_index, _) = queue_families
+            .iter()
+            .enumerate()
+            .find(|(_, queue)| queue.queue_flags.contains(QueueFlags::GRAPHICS))
+            .ok_or(DeviceError::NoSuitableQueue)?;
+
+        let queue_info = [DeviceQueueCreateInfo::builder()
+            .queue_family_index(queue_family_index as u32)
+            .queue_priorities(&[1.0])
+            .build()];
+
+        // Must create two vecs or else the pointers passed into vulkan will be null.
+        let extensions_c = self
+            .enable_extensions
+            .iter()
+            .map(|e| CString::new(&e[..]).expect("NUL terminated extension name"))
+            .collect::<Vec<_>>();
+        let extensions_ptr = extensions_c.iter().map(|c| c.as_ptr()).collect::<Vec<_>>();
+
+        let mut create_info = DeviceCreateInfo::builder()
+            .queue_create_infos(&queue_info)
+            .enabled_extension_names(&extensions_ptr[..]);
 
         if let Some(extension) = extension {
             create_info = create_info.push_next(extension);
@@ -150,7 +155,8 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
 
         // SAFETY: The Arc<InstanceHandle> stored in the device guarantees the device will not outlive the
         // instance.
-        let device = unsafe { raw_instance.create_device(self.device.handle(), &create_info, None) }?;
+        let device =
+            unsafe { raw_instance.create_device(self.device.handle(), &create_info, None) }.map_err(VkError::from)?;
         let inner = Arc::new(DeviceHandle {
             instance: instance_handle,
             device,
@@ -172,7 +178,6 @@ impl Device {
         DeviceBuilder {
             device: physical_device,
             enable_extensions: vec![],
-            queues: vec![],
             features: None,
         }
     }
@@ -207,5 +212,16 @@ impl Device {
     /// outlive the instance.
     pub fn handle(&self) -> Arc<DeviceHandle> {
         self.0.clone()
+    }
+
+    /// Returns a reference to the underlying [`ash::Device`].
+    ///
+    /// # Safety
+    /// - Callers must NOT destroy the returned device.
+    /// - Child objects created using the device must not outlive the device.
+    ///
+    /// These safety requirements may be checked by enabling validation layers.
+    pub unsafe fn raw(&self) -> &ash::Device {
+        unsafe { self.0.raw() }
     }
 }
