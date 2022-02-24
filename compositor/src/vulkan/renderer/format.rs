@@ -4,24 +4,58 @@ use smithay::{
     reexports::wayland_server::protocol::wl_shm,
 };
 
-struct FormatEntry {
-    fourcc: allocator::Fourcc,
-    shm: wl_shm::Format,
-    gl: Option<GLuint>,
-    vk: Option<vk::Format>,
-}
-
 macro_rules! format_tables {
     (
         $(
             $fourcc_wl: ident {
+                $(opaque: $opaque: expr,)?
                 alpha: $alpha: expr,
                 $(gl: $gl: ident,)?
-                $(vk: $vk: ident,)?
+                $(
+                    // The meta fragment specifier exists because the in memory representation of
+                    // `A8B8G8R8_SRGB_PACK32` depends on the host endianness.
+                    $(#[$vk_meta: meta])*
+                    vk: $vk: ident,
+                )?
             }
         ),* $(,)?
     ) => {
+        /// Returns an equivalent Vulkan format from the specified fourcc code.
+        ///
+        /// The second field of the returned tuple describes whether Vulkan needs to swizzle the alpha
+        /// component.
+        pub const fn fourcc_to_vk(
+            fourcc: smithay::backend::allocator::Fourcc,
+        ) -> Option<(ash::vk::Format, bool)> {
+            match fourcc {
+                $($(
+                    $(#[$vk_meta])*
+                    smithay::backend::allocator::Fourcc::$fourcc_wl => Some((ash::vk::Format::$vk, $alpha)),
+                )*)*
 
+                _ => None
+            }
+        }
+
+        /// Returns an equivalent Vulkan format from the specified wl_shm code.
+        ///
+        /// The second field of the returned tuple describes whether Vulkan needs to swizzle the alpha
+        /// component.
+        pub const fn wl_shm_to_vk(
+            wl: smithay::reexports::wayland_server::protocol::wl_shm::Format,
+        ) -> Option<(ash::vk::Format, bool)> {
+            match wl {
+                $($(
+                    $(#[$vk_meta])*
+                    smithay::reexports::wayland_server::protocol::wl_shm::Format::$fourcc_wl
+                        => Some((ash::vk::Format::$vk, $alpha)),
+                )*)*
+
+                _ => None
+            }
+        }
+
+        // TODO: vk to fourcc and wl_shm
     };
 }
 
@@ -53,7 +87,7 @@ format_tables! {
     },
 
     Xrgb8888 {
-        alpha: true,
+        alpha: false,
         vk: B8G8R8A8_SRGB,
     },
 
@@ -69,14 +103,21 @@ format_tables! {
         vk: R8G8B8A8_SRGB,
     },
 
+    // The PACK32 formats are equivalent to a u32 instead of a [u8; 4].
+    //
+    // This means these formats will depend on the host endianness.
+    // On little endian, this means we have a valid format mapping. On big endian, the format is is
+    // represented in memory the exact same as ABGR8888, which we already have a mapping for. 
     Rgba8888 {
         alpha: true,
-        vk: A8B8G8R8_SRGB,
+        #[cfg(target_endian = "little")]
+        vk: A8B8G8R8_SRGB_PACK32,
     },
 
     Rgbx8888 {
-        alpha: true,
-        vk: A8B8G8R8_SRGB,
+        alpha: false,
+        #[cfg(target_endian = "little")]
+        vk: A8B8G8R8_SRGB_PACK32,
     },
 
     Bgr888 {
