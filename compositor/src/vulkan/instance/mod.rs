@@ -27,7 +27,8 @@ impl InstanceHandle {
     ///
     /// # Safety
     /// - Callers must NOT destroy the returned instance.
-    /// - Child objects created using the instance must not outlive the instance.
+    /// - Child objects created using the instance must not outlive the instance
+    /// (`VUID-vkDestroyInstance-instance-00629`).
     ///
     /// These safety requirements may be checked by enabling validation layers.
     pub unsafe fn raw(&self) -> &ash::Instance {
@@ -62,9 +63,9 @@ impl Drop for InstanceHandle {
     fn drop(&mut self) {
         // SAFETY: The Vulkan specification states the following requirements:
         //
-        // > All child objects created using instance must have been destroyed prior to destroying instance.
-        // This first requirement is met since accessing the handle is unsafe, and callers must guarantee no
-        // child objects outlive the instance.
+        // > VUID-vkDestroyInstance-instance-00629: All child objects created using instance must have been
+        // destroyed prior to destroying instance. Accessing the handle is unsafe, and callers must guarantee
+        // no child objects outlive the instance.
         //
         // > Host access to instance must be externally synchronized.
         // Host access is externally synchronized since the InstanceHandle is given to users inside an Arc.
@@ -301,7 +302,8 @@ impl Instance {
     ///
     /// # Safety
     /// - Callers must NOT destroy the returned instance.
-    /// - Child objects created using the instance must not outlive the instance.
+    /// - Child objects created using the instance must not outlive the instance
+    /// (`VUID-vkDestroyInstance-instance-00629`).
     ///
     /// These safety requirements may be checked by enabling validation layers.
     pub unsafe fn raw(&self) -> &ash::Instance {

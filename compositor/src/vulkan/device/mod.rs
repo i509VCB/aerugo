@@ -29,7 +29,8 @@ impl DeviceHandle {
     ///
     /// # Safety
     /// - Callers must NOT destroy the returned device.
-    /// - Child objects created using the device must not outlive the device.
+    /// - Child objects created using the device must not outlive the device
+    /// (`VUID-vkDestroyDevice-device-00378`).
     ///
     /// These safety requirements may be checked by enabling validation layers.
     pub unsafe fn raw(&self) -> &ash::Device {
@@ -61,9 +62,9 @@ impl Drop for DeviceHandle {
 
         // SAFETY: The Vulkan specification states the following requirements:
         //
-        // > All child objects created using device must have been destroyed prior to destroying device.
-        // This first requirement is met since accessing the handle is unsafe, and callers must guarantee no
-        // child objects outlive the device.
+        // > VUID-vkDestroyDevice-device-00378: All child objects created using device must have been
+        // > destroyed prior to destroying device. Access to the raw handle of the devices is unsafe unless
+        // > the caller upholds the lifetime requirements.
         //
         // > Host access to device must be externally synchronized.
         // Host access is externally synchronized since the DeviceHandle is given to users inside an Arc.
@@ -238,7 +239,8 @@ impl Device {
     ///
     /// # Safety
     /// - Callers must NOT destroy the returned device.
-    /// - Child objects created using the device must not outlive the device.
+    /// - Child objects created using the device must not outlive the device
+    /// (`VUID-vkDestroyDevice-device-00378`).
     ///
     /// These safety requirements may be checked by enabling validation layers.
     pub unsafe fn raw(&self) -> &ash::Device {
