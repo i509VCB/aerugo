@@ -1,25 +1,77 @@
-use ash::vk;
-use smithay::{
-    backend::{allocator, renderer::gles2::ffi::types::GLuint},
-    reexports::wayland_server::protocol::wl_shm,
-};
-
 macro_rules! format_tables {
     (
         $(
             $fourcc_wl: ident {
-                $(opaque: $opaque: expr,)?
+                $(opaque: $opaque: ident,)?
                 alpha: $alpha: expr,
                 $(gl: $gl: ident,)?
                 $(
-                    // The meta fragment specifier exists because the in memory representation of
-                    // `A8B8G8R8_SRGB_PACK32` depends on the host endianness.
+                    // The meta fragment specifier exists because the in memory representation of `PACK32` formats
+                    // depend on the host endianness.
                     $(#[$vk_meta: meta])*
                     vk: $vk: ident,
                 )?
             }
         ),* $(,)?
     ) => {
+        /// Returns an equivalent fourcc code that is opaque.
+        ///
+        /// An opaque code will generally have padding instead of an alpha value.
+        pub const fn get_opaque_fourcc(
+            fourcc: smithay::backend::allocator::Fourcc,
+        ) -> Option<smithay::backend::allocator::Fourcc> {
+            match fourcc {
+                $($(
+                    smithay::backend::allocator::Fourcc::$fourcc_wl
+                        => Some(smithay::backend::allocator::Fourcc::$opaque),
+                )*)*
+
+                _ => None,
+            }
+        }
+
+        /// Returns an equivalent wl_shm code that is opaque.
+        ///
+        /// An opaque code will generally have padding instead of an alpha value.
+        pub const fn get_opaque_wl(
+            fourcc: smithay::reexports::wayland_server::protocol::wl_shm::Format,
+        ) -> Option<smithay::reexports::wayland_server::protocol::wl_shm::Format> {
+            match fourcc {
+                $($(
+                    smithay::reexports::wayland_server::protocol::wl_shm::Format::$fourcc_wl
+                        => Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::$opaque),
+                )*)*
+
+                _ => None,
+            }
+        }
+
+        /// Returns true if the fourcc code has a alpha channel.
+        pub const fn fourcc_has_alpha(
+            fourcc: smithay::backend::allocator::Fourcc,
+        ) -> bool {
+            match fourcc {
+                $(
+                    smithay::backend::allocator::Fourcc::$fourcc_wl => $alpha,
+                )*
+
+                _ => false,
+            }
+        }
+
+        /// Returns true if the wl_shm code has a alpha channel.
+        pub const fn wl_has_alpha(
+            fourcc: smithay::reexports::wayland_server::protocol::wl_shm::Format,
+        ) -> bool {
+            match fourcc {
+                $(
+                    smithay::reexports::wayland_server::protocol::wl_shm::Format::$fourcc_wl => $alpha,
+                )*
+
+                _ => false,
+            }
+        }
+
         /// Returns an equivalent Vulkan format from the specified fourcc code.
         ///
         /// The second field of the returned tuple describes whether Vulkan needs to swizzle the alpha
@@ -54,8 +106,6 @@ macro_rules! format_tables {
                 _ => None
             }
         }
-
-        // TODO: vk to fourcc and wl_shm
     };
 }
 
@@ -66,6 +116,9 @@ format_tables! {
     //
     // The first thing we declare is fourcc code. The fourcc code should appear before opening the braces.
     Argb8888 {
+        // Some formats may have an opaque equivalent where the alpha component is used as padding.
+        opaque: Xrgb8888,
+
         // Next we need to provide data as to whether the color format has an alpha channel.
         //
         // This is a required value. Some renderers do not have specific no-alpha formats but support
@@ -76,6 +129,7 @@ format_tables! {
         // components to use in an image view via the VkComponentSwizzle enum, allowing the alpha channel to
         // be disabled.
         alpha: true,
+
         // Now conversions to other formats may be specified.
         //
         // You may specify how to convert a fourcc code to an OpenGL or Vulkan format.
@@ -94,6 +148,7 @@ format_tables! {
     // Non-mandatory formats
 
     Abgr8888 {
+        opaque: Xbgr8888,
         alpha: true,
         vk: R8G8B8A8_SRGB,
     },
@@ -103,21 +158,22 @@ format_tables! {
         vk: R8G8B8A8_SRGB,
     },
 
-    // The PACK32 formats are equivalent to a u32 instead of a [u8; 4].
+    // The PACK32 formats in Vulkan are equivalent to a u32 instead of a [u8; 4].
     //
     // This means these formats will depend on the host endianness.
-    // On little endian, this means we have a valid format mapping. On big endian, the format is is
-    // represented in memory the exact same as ABGR8888, which we already have a mapping for. 
+    //
+    // TODO: Validate the PACK32 Vulkan formats.
     Rgba8888 {
+        opaque: Rgbx8888,
         alpha: true,
-        #[cfg(target_endian = "little")]
-        vk: A8B8G8R8_SRGB_PACK32,
+        // #[cfg(target_endian = "little")]
+        // vk: A8B8G8R8_SRGB_PACK32,
     },
 
     Rgbx8888 {
         alpha: false,
-        #[cfg(target_endian = "little")]
-        vk: A8B8G8R8_SRGB_PACK32,
+        // #[cfg(target_endian = "little")]
+        // vk: A8B8G8R8_SRGB_PACK32,
     },
 
     Bgr888 {
@@ -152,6 +208,7 @@ format_tables! {
     // floating point Drm Fourcc formats.
 
     Abgr16161616f {
+        opaque: Xbgr16161616f,
         alpha: true,
         vk: R16G16B16A16_SFLOAT,
     },
