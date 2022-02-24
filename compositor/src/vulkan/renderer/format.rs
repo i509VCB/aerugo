@@ -1,141 +1,122 @@
 use ash::vk;
-use smithay::backend::allocator;
+use smithay::{
+    backend::{allocator, renderer::gles2::ffi::types::GLuint},
+    reexports::wayland_server::protocol::wl_shm,
+};
 
-macro_rules! fourcc_to_vk {
-    () => {
-        
+struct FormatEntry {
+    fourcc: allocator::Fourcc,
+    shm: wl_shm::Format,
+    gl: Option<GLuint>,
+    vk: Option<vk::Format>,
+}
+
+macro_rules! format_tables {
+    (
+        $(
+            $fourcc_wl: ident {
+                alpha: $alpha: expr,
+                $(gl: $gl: ident,)?
+                $(vk: $vk: ident,)?
+            }
+        ),* $(,)?
+    ) => {
+
     };
 }
 
-const fn fourcc_to_vk(format: allocator::Fourcc) -> Option<vk::Format> {
-    // The Vulkan spec states the following regarding format conversions: https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_EXT_image_drm_format_modifier.html#_format_translation
-    // > DRM formats do not distinguish between RGB and sRGB (as of 2018-03-28)
+format_tables! {
+    // Formats mandated by wl_shm
+
+    // Using the first entry as a reference, this is how the syntax works:
     //
-    // Fourcc format identifiers in big endian.
+    // The first thing we declare is fourcc code. The fourcc code should appear before opening the braces.
+    Argb8888 {
+        // Next we need to provide data as to whether the color format has an alpha channel.
+        //
+        // This is a required value. Some renderers do not have specific no-alpha formats but support
+        // indicating which color channels should be used.
+        //
+        // For example, Vulkan does not have specific formats to indicate there is a padding byte where the
+        // alpha channel would exist in another format. Vulkan however allows specifying which color
+        // components to use in an image view via the VkComponentSwizzle enum, allowing the alpha channel to
+        // be disabled.
+        alpha: true,
+        // Now conversions to other formats may be specified.
+        //
+        // You may specify how to convert a fourcc code to an OpenGL or Vulkan format.
+        //
+        // These fields are optional, omitting them indicates there is no compatible format mapping.
+
+        // For Vulkan, we can only use SRGB formats or else we need to convert the format.
+        vk: B8G8R8A8_SRGB,
+    },
+
+    Xrgb8888 {
+        alpha: true,
+        vk: B8G8R8A8_SRGB,
+    },
+
+    // Non-mandatory formats
+
+    Abgr8888 {
+        alpha: true,
+        vk: R8G8B8A8_SRGB,
+    },
+
+    Xbgr8888 {
+        alpha: false,
+        vk: R8G8B8A8_SRGB,
+    },
+
+    Rgba8888 {
+        alpha: true,
+        vk: A8B8G8R8_SRGB,
+    },
+
+    Rgbx8888 {
+        alpha: true,
+        vk: A8B8G8R8_SRGB,
+    },
+
+    Bgr888 {
+        alpha: false,
+        vk: R8G8B8_SRGB,
+    },
+
+    Rgb888 {
+        alpha: false,
+        vk: B8G8R8_SRGB,
+    },
+
+    R8 {
+        alpha: false,
+        vk: R8_SRGB,
+    },
+
+    Gr88 {
+        alpha: false,
+        vk: R8G8_SRGB,
+    },
+
+    // § 3.9.3. 16-Bit Floating-Point Numbers
     //
-    // And from the vulkan spec:
-    // > The representation of non-packed formats is that the first component specified in the name of the
-    // > format is in the lowest memory addresses and the last component specified is in the highest memory
-    // > addresses.
+    // > 16-bit floating point numbers are defined in the “16-bit floating point numbers” section of the
+    // > Khronos Data Format Specification.
     //
-    // This means the endianess of Vulkan and fourcc formats are reversed.
+    // The khronos data format defines a 16-bit floating point number as a half precision IEEE 754-2008 float
+    // (binary16).
+    //
+    // Since the DRM Fourcc formats that are floating point are also IEEE-754, Vulkan can represent some
+    // floating point Drm Fourcc formats.
 
-    match format {
-        // These formats have a direct Vulkan representation.
-        allocator::Fourcc::Abgr8888 => Some(vk::Format::R8G8B8A8_SRGB),
-        allocator::Fourcc::Argb8888 => Some(vk::Format::B8G8R8A8_SRGB),
-        allocator::Fourcc::Xbgr8888 => Some(vk::Format::R8G8B8A8_SRGB), // TODO: X?
-        allocator::Fourcc::Xrgb8888 => Some(vk::Format::B8G8R8A8_SRGB), // TODO: X?
+    Abgr16161616f {
+        alpha: true,
+        vk: R16G16B16A16_SFLOAT,
+    },
 
-        // Common formats that *may* have direct Vulkan representations.
-        allocator::Fourcc::Abgr2101010 => None,
-        allocator::Fourcc::Argb2101010 => None,
-        allocator::Fourcc::Xbgr2101010 => None,
-        allocator::Fourcc::Xrgb2101010 => None,
-
-        // Uncommon formats that *may* have direct Vulkan representations.
-        allocator::Fourcc::R8 => None,
-        allocator::Fourcc::R16 => None,
-        allocator::Fourcc::Rg88 => None,
-        allocator::Fourcc::Rg1616 => None,
-        allocator::Fourcc::Gr88 => None,
-        allocator::Fourcc::Gr1616 => None,
-
-        // Floating point formats that *may* have direct Vulkan representations (_SFLOAT).
-        allocator::Fourcc::Abgr16161616f => None,
-        allocator::Fourcc::Argb16161616f => None,
-        allocator::Fourcc::Xbgr16161616f => None,
-        allocator::Fourcc::Xrgb16161616f => None,
-
-        // TODO: BGRA/BGRX and RGBA/BGRX formats
-
-        // TODO: These need more research
-        allocator::Fourcc::Abgr1555 => None,
-        allocator::Fourcc::Abgr4444 => None,
-        allocator::Fourcc::Argb1555 => None,
-        allocator::Fourcc::Argb4444 => None,
-        allocator::Fourcc::Axbxgxrx106106106106 => None,
-        allocator::Fourcc::Ayuv => None,
-        allocator::Fourcc::Bgr233 => None,
-        allocator::Fourcc::Bgr565 => None,
-        allocator::Fourcc::Bgr565_a8 => None,
-        allocator::Fourcc::Bgr888 => None,
-        allocator::Fourcc::Bgr888_a8 => None,
-        allocator::Fourcc::Bgra1010102 => None,
-        allocator::Fourcc::Bgra4444 => None,
-        allocator::Fourcc::Bgra5551 => None,
-        allocator::Fourcc::Bgra8888 => None,
-        allocator::Fourcc::Bgrx1010102 => None,
-        allocator::Fourcc::Bgrx4444 => None,
-        allocator::Fourcc::Bgrx5551 => None,
-        allocator::Fourcc::Bgrx8888 => None,
-        allocator::Fourcc::Bgrx8888_a8 => None,
-        allocator::Fourcc::Big_endian => None,
-        allocator::Fourcc::C8 => None,
-        allocator::Fourcc::Nv12 => None,
-        allocator::Fourcc::Nv15 => None,
-        allocator::Fourcc::Nv16 => None,
-        allocator::Fourcc::Nv21 => None,
-        allocator::Fourcc::Nv24 => None,
-        allocator::Fourcc::Nv42 => None,
-        allocator::Fourcc::Nv61 => None,
-        allocator::Fourcc::P010 => None,
-        allocator::Fourcc::P012 => None,
-        allocator::Fourcc::P016 => None,
-        allocator::Fourcc::P210 => None,
-        allocator::Fourcc::Q401 => None,
-        allocator::Fourcc::Q410 => None,
-        allocator::Fourcc::Rgb332 => None,
-        allocator::Fourcc::Rgb565 => None,
-        allocator::Fourcc::Rgb565_a8 => None,
-        allocator::Fourcc::Rgb888 => None,
-        allocator::Fourcc::Rgb888_a8 => None,
-        allocator::Fourcc::Rgba1010102 => None,
-        allocator::Fourcc::Rgba4444 => None,
-        allocator::Fourcc::Rgba5551 => None,
-        allocator::Fourcc::Rgba8888 => None,
-        allocator::Fourcc::Rgbx1010102 => None,
-        allocator::Fourcc::Rgbx4444 => None,
-        allocator::Fourcc::Rgbx5551 => None,
-        allocator::Fourcc::Rgbx8888 => None,
-        allocator::Fourcc::Rgbx8888_a8 => None,
-        allocator::Fourcc::Uyvy => None,
-        allocator::Fourcc::Vuy101010 => None,
-        allocator::Fourcc::Vuy888 => None,
-        allocator::Fourcc::Vyuy => None,
-        allocator::Fourcc::X0l0 => None,
-        allocator::Fourcc::X0l2 => None,
-        allocator::Fourcc::Xbgr1555 => None,
-        allocator::Fourcc::Xbgr4444 => None,
-        allocator::Fourcc::Xbgr8888_a8 => None,
-        allocator::Fourcc::Xrgb1555 => None,
-        allocator::Fourcc::Xrgb4444 => None,
-        allocator::Fourcc::Xrgb8888_a8 => None,
-        allocator::Fourcc::Xvyu12_16161616 => None,
-        allocator::Fourcc::Xvyu16161616 => None,
-        allocator::Fourcc::Xvyu2101010 => None,
-        allocator::Fourcc::Xyuv8888 => None,
-        allocator::Fourcc::Y0l0 => None,
-        allocator::Fourcc::Y0l2 => None,
-        allocator::Fourcc::Y210 => None,
-        allocator::Fourcc::Y212 => None,
-        allocator::Fourcc::Y216 => None,
-        allocator::Fourcc::Y410 => None,
-        allocator::Fourcc::Y412 => None,
-        allocator::Fourcc::Y416 => None,
-        allocator::Fourcc::Yuv410 => None,
-        allocator::Fourcc::Yuv411 => None,
-        allocator::Fourcc::Yuv420 => None,
-        allocator::Fourcc::Yuv420_10bit => None,
-        allocator::Fourcc::Yuv420_8bit => None,
-        allocator::Fourcc::Yuv422 => None,
-        allocator::Fourcc::Yuv444 => None,
-        allocator::Fourcc::Yuyv => None,
-        allocator::Fourcc::Yvu410 => None,
-        allocator::Fourcc::Yvu411 => None,
-        allocator::Fourcc::Yvu420 => None,
-        allocator::Fourcc::Yvu422 => None,
-        allocator::Fourcc::Yvu444 => None,
-        allocator::Fourcc::Yvyu => None,
+    Xbgr16161616f {
+        alpha: false,
+        vk: R16G16B16A16_SFLOAT,
     }
 }

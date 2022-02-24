@@ -1,9 +1,9 @@
 mod format;
 mod render_pass;
 
-use std::{collections::HashSet, sync::Arc, slice};
+use std::{collections::HashSet, slice, sync::Arc};
 
-use ash::vk::{CommandPoolCreateInfo, self, CommandBufferAllocateInfo, DrmFormatModifierPropertiesListEXT};
+use ash::vk::{self, CommandBufferAllocateInfo, CommandPoolCreateInfo, DrmFormatModifierPropertiesListEXT};
 use smithay::{
     backend::{
         allocator::{self, dmabuf::Dmabuf},
@@ -16,13 +16,14 @@ use smithay::{
 
 use super::{
     device::{Device, DeviceHandle},
-    version::Version, error::VkError,
+    error::VkError,
+    version::Version,
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Vk(#[from] VkError)
+    Vk(#[from] VkError),
 }
 
 #[derive(Debug)]
@@ -107,7 +108,7 @@ impl VulkanRenderer {
                 "VK_EXT_external_memory_dma_buf",
                 "VK_EXT_image_drm_format_modifier",
                 // Promoted in Vulkan 1.2
-                "VK_KHR_image_format_list", 
+                "VK_KHR_image_format_list",
             ])
         } else {
             Err(())
@@ -129,14 +130,12 @@ impl VulkanRenderer {
         }
 
         // Create the command pool for Vulkan
-        let pool_info = CommandPoolCreateInfo::builder()
-            .queue_family_index(device.queue_family_index() as u32);
+        let pool_info = CommandPoolCreateInfo::builder().queue_family_index(device.queue_family_index() as u32);
 
         let device = device.handle();
         let raw_device = unsafe { device.raw() };
 
-        let command_pool = unsafe { raw_device.create_command_pool(&pool_info, None) }
-            .map_err(VkError::from)?;
+        let command_pool = unsafe { raw_device.create_command_pool(&pool_info, None) }.map_err(VkError::from)?;
 
         // Create the command buffers
         let command_buffer_info = CommandBufferAllocateInfo::builder()
@@ -156,12 +155,17 @@ impl VulkanRenderer {
 
             // First query how many entries the .
             let mut formats = DrmFormatModifierPropertiesListEXT::builder();
-            let mut properties2 = vk::FormatProperties2::builder()
-                .push_next(&mut formats);
+            let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats);
 
             // SAFETY: VK_EXT_image_drm_format_modifier is enabled
             // Null pointer for pDrmFormatModifierProperties is safe when obtaining count.
-            unsafe { instance.get_physical_device_format_properties2(device.physical, vk::Format::UNDEFINED, &mut properties2) };
+            unsafe {
+                instance.get_physical_device_format_properties2(
+                    device.physical,
+                    vk::Format::UNDEFINED,
+                    &mut properties2,
+                )
+            };
 
             // Manual lifetime fighting
             drop(properties2);
@@ -171,28 +175,33 @@ impl VulkanRenderer {
             let mut vec = Vec::with_capacity(count);
 
             // Now get the properties
-            let mut formats = DrmFormatModifierPropertiesListEXT::builder()
-                .drm_format_modifier_properties(&mut vec[..]);
-            let mut properties2 = vk::FormatProperties2::builder()
-                .push_next(&mut formats);
-
+            let mut formats =
+                DrmFormatModifierPropertiesListEXT::builder().drm_format_modifier_properties(&mut vec[..]);
+            let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats);
 
             // QUESTION: ANV returns nothing with UNDEFINED, but radv returns some formats
 
             // SAFETY: Implementation will only write the specified number of modifiers in the count, and the vec has that capacity.
-            unsafe { instance.get_physical_device_format_properties2(device.physical, vk::Format::UNDEFINED, &mut properties2) };
+            unsafe {
+                instance.get_physical_device_format_properties2(
+                    device.physical,
+                    vk::Format::UNDEFINED,
+                    &mut properties2,
+                )
+            };
             drop(properties2);
             // SAFETY: Elements from 0..count were just initialized.
             unsafe { vec.set_len(count) };
 
-            let modifiers = vec.iter().map(|properties| {
-                allocator::Modifier::from(properties.drm_format_modifier)
-            }).collect::<Vec<_>>();
+            let modifiers = vec
+                .iter()
+                .map(|properties| allocator::Modifier::from(properties.drm_format_modifier))
+                .collect::<Vec<_>>();
 
             println!("{:#?}", vec);
             println!("{:#?}", modifiers);
         };
- 
+
         Ok(VulkanRenderer {
             command_buffer,
             command_pool,
