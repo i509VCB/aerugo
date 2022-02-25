@@ -1,7 +1,7 @@
 mod format;
 mod render_pass;
 
-use std::{collections::HashSet, slice, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use ash::vk::{self, CommandBufferAllocateInfo, CommandPoolCreateInfo, DrmFormatModifierPropertiesListEXT};
 use smithay::{
@@ -9,7 +9,7 @@ use smithay::{
         allocator::{self, dmabuf::Dmabuf},
         renderer::{Bind, Frame, ImportDma, ImportShm, Renderer, Texture, TextureFilter, Transform, Unbind},
     },
-    reexports::wayland_server::protocol::wl_buffer,
+    reexports::wayland_server::protocol::{wl_buffer, wl_shm},
     utils::{Buffer, Physical, Rectangle, Size},
     wayland::compositor::SurfaceData,
 };
@@ -91,6 +91,10 @@ pub struct VulkanRenderer {
     /// Since a vulkan renderer owns some vulkan objects, we need this handle to ensure objects do not outlive
     /// the renderer.
     device: Arc<DeviceHandle>,
+    /// Format and modifier pairs the renderer may import a dmabuf using.
+    dma_formats: HashSet<allocator::Format>,
+    /// Formats the renderer may import shared memory using.
+    shm_formats: Vec<wl_shm::Format>,
 }
 
 impl VulkanRenderer {
@@ -149,74 +153,83 @@ impl VulkanRenderer {
             .next()
             .unwrap();
 
-        // Build the list of valid dmabuf formats
-        let dmabuf_formats = {
+        // Build the list of valid dmabuf and shm formats
+        let mut shm_formats = vec![];
+        let dma_formats = {
             let instance = unsafe { device.instance.raw() };
+            let mut dma_formats = vec![];
 
-            // First query how many entries the .
-            let mut formats = DrmFormatModifierPropertiesListEXT::builder();
-            let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats);
+            for code in format::formats() {
+                if let Some((vk, _)) = format::fourcc_to_vk(code) {
+                    // First we need to query how many entries are available.
+                    let mut formats_ext = DrmFormatModifierPropertiesListEXT::builder();
+                    let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats_ext);
 
-            // SAFETY: VK_EXT_image_drm_format_modifier is enabled
-            // Null pointer for pDrmFormatModifierProperties is safe when obtaining count.
-            unsafe {
-                instance.get_physical_device_format_properties2(
-                    device.physical,
-                    vk::Format::UNDEFINED,
-                    &mut properties2,
-                )
-            };
+                    // SAFETY: VK_EXT_image_drm_format_modifier is enabled
+                    // Null pointer for pDrmFormatModifierProperties is safe when obtaining count.
+                    unsafe {
+                        instance.get_physical_device_format_properties2(device.physical, vk, &mut properties2);
+                    }
 
-            // Manual lifetime fighting
-            drop(properties2);
-            let count = formats.drm_format_modifier_count as usize;
+                    // Immediately end the mutable borrow on `formats_ext` in order to ensure the formats_ext is accessible.
+                    drop(properties2);
 
-            drop(formats);
-            let mut vec = Vec::with_capacity(count);
+                    let modifier_count = formats_ext.drm_format_modifier_count as usize;
+                    let mut modifiers = Vec::with_capacity(modifier_count);
+                    formats_ext = formats_ext.drm_format_modifier_properties(&mut modifiers[..]);
 
-            // Now get the properties
-            let mut formats =
-                DrmFormatModifierPropertiesListEXT::builder().drm_format_modifier_properties(&mut vec[..]);
-            let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats);
+                    // Now we can create a new struct since the fields are filled in on the extension.
+                    let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats_ext);
 
-            // QUESTION: ANV returns nothing with UNDEFINED, but radv returns some formats
+                    // Initialize the value
+                    unsafe {
+                        instance.get_physical_device_format_properties2(device.physical, vk, &mut properties2);
 
-            // SAFETY: Implementation will only write the specified number of modifiers in the count, and the vec has that capacity.
-            unsafe {
-                instance.get_physical_device_format_properties2(
-                    device.physical,
-                    vk::Format::UNDEFINED,
-                    &mut properties2,
-                )
-            };
-            drop(properties2);
-            // SAFETY: Elements from 0..count were just initialized.
-            unsafe { vec.set_len(count) };
+                        // SAFETY: Elements from 0..len() were just initialized.
+                        modifiers.set_len(modifier_count);
+                    }
 
-            let modifiers = vec
-                .iter()
-                .map(|properties| allocator::Modifier::from(properties.drm_format_modifier))
-                .collect::<Vec<_>>();
+                    // If a format has some number of modifiers, then we can import wl_shm buffers for the
+                    // format.
+                    if !modifiers.is_empty() {
+                        if let Some(format) = format::fourcc_to_wl(code) {
+                            shm_formats.push(format);
+                        }
+                    }
 
-            println!("{:#?}", vec);
-            println!("{:#?}", modifiers);
+                    for modifier_properties in modifiers {
+                        dma_formats.push(allocator::Format {
+                            code,
+                            modifier: allocator::Modifier::from(modifier_properties.drm_format_modifier),
+                        })
+                    }
+                }
+            }
+
+            HashSet::from_iter(dma_formats.into_iter())
         };
+
+        // Ensure the shm renderer contains the mandatory formats
+        if !shm_formats.iter().any(|format| format == &wl_shm::Format::Argb8888) {
+            todo!("Missing argb8888")
+        }
+
+        // Ensure the shm renderer contains the mandatory formats
+        if !shm_formats.iter().any(|format| format == &wl_shm::Format::Xrgb8888) {
+            todo!("Missing xrgb8888")
+        }
 
         Ok(VulkanRenderer {
             command_buffer,
             command_pool,
             device,
+            dma_formats,
+            shm_formats,
         })
     }
 
     pub fn device(&self) -> Arc<DeviceHandle> {
         self.device.clone()
-    }
-
-    pub fn dmabuf_formats<'a>(&'a self) -> Box<dyn Iterator<Item = &'a allocator::Format> + 'a> {
-        // We can lookup this information using `VkDrmFormatModifierPropertiesListEXT` extension to
-        // `vkGetPhysicalDeviceFormatProperties2`
-        todo!()
     }
 }
 
@@ -254,7 +267,7 @@ impl Bind<Dmabuf> for VulkanRenderer {
     }
 
     fn supported_formats(&self) -> Option<HashSet<allocator::Format>> {
-        todo!()
+        Some(self.dma_formats.clone())
     }
 }
 
@@ -270,6 +283,10 @@ impl ImportDma for VulkanRenderer {
     fn import_dmabuf(&mut self, _dmabuf: &Dmabuf) -> Result<Self::TextureId, Self::Error> {
         todo!()
     }
+
+    fn dmabuf_formats<'a>(&'a self) -> Box<dyn Iterator<Item = &'a allocator::Format> + 'a> {
+        Box::new(self.dma_formats.iter())
+    }
 }
 
 impl ImportShm for VulkanRenderer {
@@ -280,6 +297,10 @@ impl ImportShm for VulkanRenderer {
         _damage: &[Rectangle<i32, Buffer>],
     ) -> Result<Self::TextureId, Self::Error> {
         todo!()
+    }
+
+    fn shm_formats(&self) -> &[wl_shm::Format] {
+        &self.shm_formats[..]
     }
 }
 

@@ -75,6 +75,8 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 mod test {
     use std::error::Error;
 
+    use smithay::backend::renderer::{ImportDma, ImportShm};
+
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
     use super::{instance::Instance, physical_device::PhysicalDevice, VALIDATION_LAYER_NAME};
@@ -123,6 +125,9 @@ mod test {
         let device = device_builder.build()?;
 
         let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
+
+        println!("DMA {:#?}", renderer.dmabuf_formats().collect::<Vec<_>>());
+        println!("SHM {:#?}", renderer.shm_formats());
 
         drop(device);
         drop(instance);

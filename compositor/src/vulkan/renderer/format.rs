@@ -14,6 +14,15 @@ macro_rules! format_tables {
             }
         ),* $(,)?
     ) => {
+        pub fn formats() -> impl ExactSizeIterator<Item = smithay::backend::allocator::Fourcc> {
+            [
+                $(
+                    smithay::backend::allocator::Fourcc::$fourcc_wl,
+                )*
+            ]
+            .into_iter()
+        }
+
         /// Returns an equivalent fourcc code that is opaque.
         ///
         /// An opaque code will generally have padding instead of an alpha value.
@@ -216,5 +225,23 @@ format_tables! {
     Xbgr16161616f {
         alpha: false,
         vk: R16G16B16A16_SFLOAT,
+    }
+}
+
+pub fn fourcc_to_wl(
+    fourcc: smithay::backend::allocator::Fourcc,
+) -> Option<smithay::reexports::wayland_server::protocol::wl_shm::Format> {
+    match fourcc {
+        // Manual mapping for the two mandatory formats wl_shm defines.
+        //
+        // Every other format should be the same as the fourcc code.
+        smithay::backend::allocator::Fourcc::Argb8888 => {
+            Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::Argb8888)
+        }
+        smithay::backend::allocator::Fourcc::Xrgb8888 => {
+            Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::Xrgb8888)
+        }
+
+        fourcc => smithay::reexports::wayland_server::protocol::wl_shm::Format::from_raw(fourcc as u32),
     }
 }
