@@ -89,8 +89,6 @@ impl CompositorState {
     ///
     /// Most compositor logic should use the dynamically typed functions to get access to some of the state the backend
     /// manages.
-    ///
-    /// Backend implementations may use [`State::downcast_backend`] to access internal data.
     pub fn backend(&self) -> &dyn Backend {
         self.backend.as_ref()
     }
@@ -98,8 +96,6 @@ impl CompositorState {
     /// Returns a dynamically typed unique reference to the backend in use.
     ///
     /// Most compositor logic should use the dynamically typed functions to mutate the state the backend.
-    ///
-    /// Backend implementations may use [`State::downcast_backend_mut`] to mutate internal data.
     pub fn backend_mut(&mut self) -> &mut dyn Backend {
         self.backend.as_mut()
     }
@@ -129,7 +125,7 @@ impl CompositorState {
 
     /// Handles some input event.
     ///
-    /// Any special events, as defined by the [`InputBackend::Special`] variant should not be passed into this function
+    /// Any special events, as defined by the [`InputEvent::Special`] variant should not be passed into this function
     /// and instead handled in the originating backend before calling this function
     pub fn handle_input<I: InputBackend>(&mut self, event: InputEvent<I>) {
         #[allow(clippy::single_match)] // temporary

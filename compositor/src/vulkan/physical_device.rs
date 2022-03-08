@@ -36,7 +36,7 @@ impl PhysicalDevice<'_> {
             .map(|device| {
                 let features = unsafe { raw_instance.get_physical_device_features(device) };
 
-                let extensions = unsafe { raw_instance.enumerate_device_extension_properties(device) }?
+                let instance_extensions = unsafe { raw_instance.enumerate_device_extension_properties(device) }?
                     .iter()
                     .map(|extension| {
                         let name = unsafe { CStr::from_ptr(&extension.extension_name as *const _) };
@@ -58,7 +58,7 @@ impl PhysicalDevice<'_> {
                     let mut supported = instance.version() >= Version::VERSION_1_2;
                     // Otherwise the instance must have enabled `VK_KHR_get_physical_device_properties2`,
                     // which has been promoted to core in 1.1
-                    supported |= extensions.iter().any(|e| e == "VK_KHR_driver_properties");
+                    supported |= instance_extensions.iter().any(|e| e == "VK_KHR_driver_properties");
                     supported
                 };
 
@@ -95,7 +95,7 @@ impl PhysicalDevice<'_> {
                     driver,
                     properties,
                     features,
-                    extensions,
+                    extensions: instance_extensions,
                 })
             })
             .collect::<Result<Vec<_>, VkError>>()?

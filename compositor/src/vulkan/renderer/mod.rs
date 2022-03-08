@@ -19,6 +19,7 @@ use super::{
     device::{Device, DeviceHandle},
     error::VkError,
     version::Version,
+    UnsupportedVulkanVersion,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -99,7 +100,7 @@ impl VulkanRenderer {
     ///
     /// This list satisfies the requirement that all enabled extensions also enable their dependencies
     /// (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`).
-    pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], ()> {
+    pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], UnsupportedVulkanVersion> {
         if version >= Version::VERSION_1_2 {
             Ok(&[
                 "VK_KHR_external_memory_fd",
@@ -115,7 +116,7 @@ impl VulkanRenderer {
                 "VK_KHR_image_format_list",
             ])
         } else {
-            Err(())
+            Err(UnsupportedVulkanVersion)
         }
     }
 

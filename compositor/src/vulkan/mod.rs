@@ -19,8 +19,8 @@ The following guidelines should be followed for code added to this backend:
 //! This module contains thin wrappers over [`ash`](https://crates.io/crates/ash) to allow more easily using Vulkan
 //! while not being restrictive in how Vulkan may be used. The thin wrapper addresses the following:
 //! - Enumerating over all available instance extensions and layers.
-//! - Creating an instance through a [`builder`](InstanceBuilder) using requested instance extensions, layers and app
-//! info.
+//! - Creating an instance through a [`builder`](instance::Instance::builder) using requested instance
+//!   extensions, layers and app info.
 //! - Enumerating over all available physical devices, device capabilities, extensions/
 //! - Creating a logical devices.
 
@@ -29,9 +29,10 @@ The following guidelines should be followed for code added to this backend:
 //!
 //! ## How to use Vulkan
 //!
-//! To use this module, start by creating an instance using [`Instance::builder`]. Vulkan **is** explicit and requires
-//! you request every layer and extension you wish to use, so add the names of the extensions and layers to the builder
-//! so they may be used. To complete construction of the instance, call [`InstanceBuilder::build`].
+//! To use this module, start by creating an instance using [`Instance::builder`](instance::Instance::builder).
+//! Vulkan **is** explicit and requires you request every layer and extension you wish to use, so add the
+//! names of the extensions and layers to the builder so they may be used. To complete construction of the
+//! instance, call [`InstanceBuilder::build`](instance::InstanceBuilder::build).
 //!
 //! In a development environment, it may be useful to enable validation layers to assist with programming. You may
 //! enable validation layers through either your environment variables (setting the value of `VK_INSTANCE_LAYERS`) or
@@ -59,7 +60,8 @@ use self::version::Version;
 
 /// The name of the validation layer.
 ///
-/// This may be passed into [`InstanceBuilder::layer`] to enable validation layers.
+/// This may be passed into [`InstanceBuilder::layer`](instance::InstanceBuilder::layer) to enable validation
+/// layers.
 ///
 /// This extension should not be used in production for the following reasons:
 /// 1) Validation layers are not present on most systems.
@@ -69,6 +71,10 @@ use self::version::Version;
     deprecated = "Validation layers should not be enabled in release"
 )]
 pub const VALIDATION_LAYER_NAME: &str = "VK_LAYER_KHRONOS_validation";
+
+#[derive(Debug, thiserror::Error)]
+#[error("Smithay requires at least Vulkan 1.1")]
+pub struct UnsupportedVulkanVersion;
 
 const SMITHAY_VERSION: Version = Version {
     variant: 0,

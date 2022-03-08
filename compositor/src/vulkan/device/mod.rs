@@ -86,11 +86,11 @@ pub struct DeviceBuilder<'i, 'p> {
 }
 
 impl<'i, 'p> DeviceBuilder<'i, 'p> {
-    /// Adds an instance extension to be requested when creating an [`Instance`].
+    /// Adds an instance extension to be requested when creating an [`Instance`](super::instance::Instance).
     ///
     /// The extension must be supported by the Vulkan runtime or else building the instance will fail. A great way to
     /// ensure the extension you are requesting is supported is to check if your extension is listed in
-    /// [`Instance::enumerate_extensions`].
+    /// [`Instance::enumerate_extensions`](super::instance::Instance::enumerate_extensions).
     pub fn extension(mut self, extension: impl Into<String>) -> Self {
         self.enable_extensions.push(extension.into());
         self
@@ -109,7 +109,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     /// The valid usage requirement for vkCreateDevice, `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`,
     /// states all enabled extensions must also enable the require dependencies.
     ///
-    /// https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#extendingvulkan-extensions-extensiondependencies
+    /// <https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#extendingvulkan-extensions-extensiondependencies>
     pub unsafe fn build(self) -> Result<Device, DeviceError> {
         // SAFETY(VUID-VkDeviceCreateInfo-pNext-pNext): None means the pNext field is a null pointer
         //

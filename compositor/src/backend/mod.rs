@@ -21,11 +21,6 @@ use crate::state::NameMe;
 ///
 /// Generally implementations of this trait will set up some way to handle device events and present what the
 /// compositor has rendered.
-///
-/// ## Accessing data stored on a backend object
-///
-/// Data may be accessed in most places through [`State::backend`] or [`State::backend_mut`] inside of callbacks or
-/// [`DispatchData`](smithay::reexports::wayland_server::DispatchData) and then downcast to the backend internal type.
 pub trait Backend: fmt::Debug + Downcast {
     fn new(_logger: Logger, _handle: LoopHandle<'_, NameMe>, _display: &mut Display) -> Result<Self, Box<dyn Error>>
     where
