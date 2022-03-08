@@ -29,9 +29,7 @@ pub struct PhysicalDevice<'i> {
 impl PhysicalDevice<'_> {
     /// Enumerates over the physical devices
     pub fn enumerate(instance: &Instance) -> Result<impl Iterator<Item = PhysicalDevice<'_>>, VkError> {
-        // SAFETY: The lifetime on PhysicalDevice ensures the Physical devices created using the handle do not
-        // outlive the instance.
-        let raw_instance = unsafe { instance.raw() };
+        let raw_instance = instance.raw();
 
         Ok(unsafe { raw_instance.enumerate_physical_devices() }?
             .into_iter()

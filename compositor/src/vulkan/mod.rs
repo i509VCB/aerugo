@@ -1,5 +1,14 @@
 #![allow(dead_code)]
 #![forbid(unsafe_op_in_unsafe_fn)]
+/*
+Conventions for contributors:
+
+The following guidelines should be followed for code added to this backend:
+1. Where appropriate, the ID of a Valid Usage statement should be placed as a comment near a Vulkan command or
+   function. A Valid ID usage looks like this for example: `VUID-vkDestroyDevice-device-00378`.
+
+   Sometimes implicit Valid Usage may be mentioned if the requirements are not obvious.
+*/
 // Because this is an experiment for a future pull request.
 //#![warn(missing_docs)] // not as much yellow
 
@@ -75,24 +84,19 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 mod test {
     use std::error::Error;
 
-    use smithay::backend::renderer::{ImportDma, ImportShm};
-
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
     use super::{instance::Instance, physical_device::PhysicalDevice, VALIDATION_LAYER_NAME};
 
     #[test]
-    fn instance() {
-        let _instance = Instance::builder().build().expect("Failed to create instance");
-    }
-
-    #[test]
     fn instance_with_layer() -> Result<(), Box<dyn Error>> {
-        let instance = Instance::builder()
-            .layer(VALIDATION_LAYER_NAME)
-            .api_version(Version::VERSION_1_1)
-            .build()
-            .expect("Failed to create instance");
+        let instance = unsafe {
+            Instance::builder()
+                .layer(VALIDATION_LAYER_NAME)
+                .api_version(Version::VERSION_1_1)
+                .build()
+        }
+        .expect("Failed to create instance");
 
         let physical = PhysicalDevice::enumerate(&instance)?
             .filter(|d| {
@@ -122,12 +126,12 @@ mod test {
             device_builder = device_builder.extension(*extension);
         }
 
-        let device = device_builder.build()?;
+        let device = unsafe { device_builder.build() }?;
 
         let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
 
-        println!("DMA {:#?}", renderer.dmabuf_formats().collect::<Vec<_>>());
-        println!("SHM {:#?}", renderer.shm_formats());
+        //println!("DMA {:#?}", renderer.dmabuf_formats().collect::<Vec<_>>());
+        //println!("SHM {:#?}", renderer.shm_formats());
 
         drop(device);
         drop(instance);

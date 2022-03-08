@@ -25,13 +25,14 @@ pub struct InstanceHandle {
 impl InstanceHandle {
     /// Returns a reference to the underlying [`ash::Instance`].
     ///
-    /// # Safety
-    /// - Callers must NOT destroy the returned instance.
-    /// - Child objects created using the instance must not outlive the instance
-    /// (`VUID-vkDestroyInstance-instance-00629`).
+    /// Take care when using the underlying type, since all the valid usage requirements in the Vulkan
+    /// specification apply.
     ///
-    /// These safety requirements may be checked by enabling validation layers.
-    pub unsafe fn raw(&self) -> &ash::Instance {
+    /// In particular, keep in mind that child objects created using the instance must not outlive the
+    /// instance (`VUID-vkDestroyInstance-instance-00629`).
+    ///
+    /// The valid usage requirements may be checked by enabling validation layers.
+    pub fn raw(&self) -> &ash::Instance {
         &self.handle
     }
 
@@ -132,7 +133,12 @@ impl InstanceBuilder {
     }
 
     /// Creates an instance using this builder.
-    pub fn build(self) -> Result<Instance, InstanceError> {
+    ///
+    /// # Safety
+    ///
+    /// The valid usage requirement for vkCreateInstance, `VUID-vkCreateInstance-ppEnabledExtensionNames-01388`,
+    /// states all enabled extensions must also enable the require dependencies.
+    pub unsafe fn build(self) -> Result<Instance, InstanceError> {
         // We require at least Vulkan 1.1
         if self.api_version < Version::VERSION_1_1 {
             return Err(InstanceError::UnsupportedVulkanVersion(self.api_version));
@@ -208,6 +214,8 @@ impl InstanceBuilder {
             .enabled_layer_names(&layer_ptrs[..])
             .enabled_extension_names(&extension_ptrs[..]);
 
+        // SAFETY(VUID-vkCreateInstance-ppEnabledExtensionNames-01388): The caller has guaranteed the requirements.
+        // SAFETY: The Entry will always outlive the instance since it is a static variable.
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }.map_err(VkError::from)?;
         let handle = Arc::new(InstanceHandle {
             handle: instance,
@@ -293,20 +301,22 @@ impl Instance {
     ///
     /// The Vulkan API enforces a strict lifetimes over objects that are created, meaning child objects
     /// cannot outlive their instance. A great way to ensure the instance will live long enough is storing a
-    /// handle inside the container of child objects.
+    /// handle inside the container of child objects. This handle will automatically destroy the instance
+    /// when the reference count reaches zero.
     pub fn handle(&self) -> Arc<InstanceHandle> {
         self.0.clone()
     }
 
     /// Returns a reference to the underlying [`ash::Instance`].
     ///
-    /// # Safety
-    /// - Callers must NOT destroy the returned instance.
-    /// - Child objects created using the instance must not outlive the instance
-    /// (`VUID-vkDestroyInstance-instance-00629`).
+    /// Take care when using the underlying type, since all the valid usage requirements in the Vulkan
+    /// specification apply.
     ///
-    /// These safety requirements may be checked by enabling validation layers.
-    pub unsafe fn raw(&self) -> &ash::Instance {
-        unsafe { self.0.raw() }
+    /// In particular, keep in mind that child objects created using the instance must not outlive the
+    /// instance (`VUID-vkDestroyInstance-instance-00629`).
+    ///
+    /// The valid usage requirements may be checked by enabling validation layers.
+    pub fn raw(&self) -> &ash::Instance {
+        self.0.raw()
     }
 }

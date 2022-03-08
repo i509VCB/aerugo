@@ -1,247 +1,265 @@
-macro_rules! format_tables {
-    (
-        $(
-            $fourcc_wl: ident {
-                $(opaque: $opaque: ident,)?
-                alpha: $alpha: expr,
-                $(gl: $gl: ident,)?
-                $(
-                    // The meta fragment specifier exists because the in memory representation of `PACK32` formats
-                    // depend on the host endianness.
-                    $(#[$vk_meta: meta])*
-                    vk: $vk: ident,
-                )?
-            }
-        ),* $(,)?
-    ) => {
-        pub fn formats() -> impl ExactSizeIterator<Item = smithay::backend::allocator::Fourcc> {
-            [
-                $(
-                    smithay::backend::allocator::Fourcc::$fourcc_wl,
-                )*
-            ]
-            .into_iter()
-        }
+use ash::vk;
 
-        /// Returns an equivalent fourcc code that is opaque.
-        ///
-        /// An opaque code will generally have padding instead of an alpha value.
-        pub const fn get_opaque_fourcc(
-            fourcc: smithay::backend::allocator::Fourcc,
-        ) -> Option<smithay::backend::allocator::Fourcc> {
-            match fourcc {
-                $($(
-                    smithay::backend::allocator::Fourcc::$fourcc_wl
-                        => Some(smithay::backend::allocator::Fourcc::$opaque),
-                )*)*
+use crate::vulkan::{
+    error::VkError,
+    renderer::format_convert::{formats, fourcc_to_vk},
+};
 
-                _ => None,
-            }
-        }
+use super::VulkanRenderer;
 
-        /// Returns an equivalent wl_shm code that is opaque.
-        ///
-        /// An opaque code will generally have padding instead of an alpha value.
-        pub const fn get_opaque_wl(
-            fourcc: smithay::reexports::wayland_server::protocol::wl_shm::Format,
-        ) -> Option<smithay::reexports::wayland_server::protocol::wl_shm::Format> {
-            match fourcc {
-                $($(
-                    smithay::reexports::wayland_server::protocol::wl_shm::Format::$fourcc_wl
-                        => Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::$opaque),
-                )*)*
+/// Features a format must support in order to be used as a texture format.
+///
+/// A format which supports these features may be used to import memory or SHM buffers.
+pub(crate) const TEXTURE_FEATURES: vk::FormatFeatureFlags = {
+    // TODO: Replace the conversion to as_raw when `impl const` is stabilized and ash uses it for bitwise
+    // operations on flags.
+    let bits =
+        // Transfer features must be supported since we currently use a staging buffer to upload texture data.
+        //
+        // TODO(i5): There might be an optimization we can make with iGPUs since an iGPU (and some dGPUs) will
+        // share memory, meaning device memory is host visible (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT). In
+        // theory it would be possible to then instead us `vkMapMemory` and entirely bypass the staging
+        // buffer. Not 100% sure if this would affect the required flags in the future. For the sake of
+        // maximum compatibility, a staging buffer will always work.
+        vk::FormatFeatureFlags::TRANSFER_SRC.as_raw()
+        | vk::FormatFeatureFlags::TRANSFER_DST.as_raw()
+        | vk::FormatFeatureFlags::SAMPLED_IMAGE.as_raw();
+    vk::FormatFeatureFlags::from_raw(bits)
+};
 
-                _ => None,
-            }
-        }
+pub(crate) const TEXTURE_USAGE: vk::ImageUsageFlags = {
+    // TODO: Replace the conversion to as_raw when `impl const` is stabilized and ash uses it for bitwise
+    // operations on flags.
+    let bits = vk::ImageUsageFlags::SAMPLED.as_raw() | vk::ImageUsageFlags::TRANSFER_DST.as_raw();
+    vk::ImageUsageFlags::from_raw(bits)
+};
 
-        /// Returns true if the fourcc code has a alpha channel.
-        pub const fn fourcc_has_alpha(
-            fourcc: smithay::backend::allocator::Fourcc,
-        ) -> bool {
-            match fourcc {
-                $(
-                    smithay::backend::allocator::Fourcc::$fourcc_wl => $alpha,
-                )*
+/// Features a format must support in order to be used for rendering.
+pub(crate) const RENDER_FEATURES: vk::FormatFeatureFlags = {
+    // TODO: Replace the conversion to as_raw when `impl const` is stabilized and ash uses it for bitwise
+    // operations on flags.
+    let bits =
+        vk::FormatFeatureFlags::COLOR_ATTACHMENT.as_raw() | vk::FormatFeatureFlags::COLOR_ATTACHMENT_BLEND.as_raw();
+    vk::FormatFeatureFlags::from_raw(bits)
+};
 
-                _ => false,
-            }
-        }
+pub(crate) const RENDER_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::COLOR_ATTACHMENT;
 
-        /// Returns true if the wl_shm code has a alpha channel.
-        pub const fn wl_has_alpha(
-            fourcc: smithay::reexports::wayland_server::protocol::wl_shm::Format,
-        ) -> bool {
-            match fourcc {
-                $(
-                    smithay::reexports::wayland_server::protocol::wl_shm::Format::$fourcc_wl => $alpha,
-                )*
+/// Features a format must support in order to be used as a dmabuf texture format.
+///
+/// A format which supports these features may be used to import dmabufs of the same format.
+pub(crate) const DMA_TEXTURE_FEATURES: vk::FormatFeatureFlags = vk::FormatFeatureFlags::SAMPLED_IMAGE;
 
-                _ => false,
-            }
-        }
+pub(crate) const DMA_TEXTURE_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::SAMPLED;
 
-        /// Returns an equivalent Vulkan format from the specified fourcc code.
-        ///
-        /// The second field of the returned tuple describes whether Vulkan needs to swizzle the alpha
-        /// component.
-        pub const fn fourcc_to_vk(
-            fourcc: smithay::backend::allocator::Fourcc,
-        ) -> Option<(ash::vk::Format, bool)> {
-            match fourcc {
-                $($(
-                    $(#[$vk_meta])*
-                    smithay::backend::allocator::Fourcc::$fourcc_wl => Some((ash::vk::Format::$vk, $alpha)),
-                )*)*
+/// # Safety
+///
+/// The physical device must support the `VK_EXT_image_drm_format_modifier` extension.
+pub(crate) unsafe fn get_format_modifiers(
+    instance: &ash::Instance,
+    phy: vk::PhysicalDevice,
+    format: vk::Format,
+) -> Vec<vk::DrmFormatModifierPropertiesEXT> {
+    // First we need to query how many entries are available.
+    let mut formats_ext = vk::DrmFormatModifierPropertiesListEXT::builder();
+    let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats_ext);
 
-                _ => None
-            }
-        }
+    // SAFETY: VK_EXT_image_drm_format_modifier is enabled
+    // Null pointer for pDrmFormatModifierProperties is safe when obtaining count.
+    unsafe {
+        instance.get_physical_device_format_properties2(phy, format, &mut properties2);
+    }
 
-        /// Returns an equivalent Vulkan format from the specified wl_shm code.
-        ///
-        /// The second field of the returned tuple describes whether Vulkan needs to swizzle the alpha
-        /// component.
-        pub const fn wl_shm_to_vk(
-            wl: smithay::reexports::wayland_server::protocol::wl_shm::Format,
-        ) -> Option<(ash::vk::Format, bool)> {
-            match wl {
-                $($(
-                    $(#[$vk_meta])*
-                    smithay::reexports::wayland_server::protocol::wl_shm::Format::$fourcc_wl
-                        => Some((ash::vk::Format::$vk, $alpha)),
-                )*)*
+    // Immediately end the mutable borrow on `formats_ext` in order to ensure the formats_ext is accessible.
+    drop(properties2);
 
-                _ => None
-            }
-        }
-    };
+    let modifier_count = formats_ext.drm_format_modifier_count as usize;
+    let mut modifiers = Vec::with_capacity(modifier_count);
+    formats_ext = formats_ext.drm_format_modifier_properties(&mut modifiers[..]);
+    // FIXME: Ash sets `drm_format_modifier_count`, but len() returns zero, we have the length so we need to
+    // set it again.
+    formats_ext.drm_format_modifier_count = modifier_count as _;
+
+    // Now we can create a new struct since the fields are filled in on the extension.
+    let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats_ext);
+
+    // Initialize the value
+    unsafe {
+        instance.get_physical_device_format_properties2(phy, format, &mut properties2);
+
+        // SAFETY: Elements from 0..len() were just initialized.
+        modifiers.set_len(modifier_count);
+    }
+
+    modifiers
 }
 
-format_tables! {
-    // Formats mandated by wl_shm
+pub(crate) unsafe fn get_external_image_properties(
+    instance: &ash::Instance,
+    phy: vk::PhysicalDevice,
+    format: vk::Format,
+    usage: vk::ImageUsageFlags,
+) -> Result<Option<vk::ExternalMemoryProperties>, VkError> {
+    let mut external_mem_properties = vk::ExternalImageFormatProperties::default();
+    let mut format_properties = vk::ImageFormatProperties2::builder().push_next(&mut external_mem_properties);
+    let format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
+        .format(format)
+        .tiling(vk::ImageTiling::OPTIMAL)
+        .ty(vk::ImageType::TYPE_2D)
+        .usage(usage);
 
-    // Using the first entry as a reference, this is how the syntax works:
-    //
-    // The first thing we declare is fourcc code. The fourcc code should appear before opening the braces.
-    Argb8888 {
-        // Some formats may have an opaque equivalent where the alpha component is used as padding.
-        opaque: Xrgb8888,
-
-        // Next we need to provide data as to whether the color format has an alpha channel.
-        //
-        // This is a required value. Some renderers do not have specific no-alpha formats but support
-        // indicating which color channels should be used.
-        //
-        // For example, Vulkan does not have specific formats to indicate there is a padding byte where the
-        // alpha channel would exist in another format. Vulkan however allows specifying which color
-        // components to use in an image view via the VkComponentSwizzle enum, allowing the alpha channel to
-        // be disabled.
-        alpha: true,
-
-        // Now conversions to other formats may be specified.
-        //
-        // You may specify how to convert a fourcc code to an OpenGL or Vulkan format.
-        //
-        // These fields are optional, omitting them indicates there is no compatible format mapping.
-
-        // For Vulkan, we can only use SRGB formats or else we need to convert the format.
-        vk: B8G8R8A8_SRGB,
-    },
-
-    Xrgb8888 {
-        alpha: false,
-        vk: B8G8R8A8_SRGB,
-    },
-
-    // Non-mandatory formats
-
-    Abgr8888 {
-        opaque: Xbgr8888,
-        alpha: true,
-        vk: R8G8B8A8_SRGB,
-    },
-
-    Xbgr8888 {
-        alpha: false,
-        vk: R8G8B8A8_SRGB,
-    },
-
-    // The PACK32 formats in Vulkan are equivalent to a u32 instead of a [u8; 4].
-    //
-    // This means these formats will depend on the host endianness.
-    //
-    // TODO: Validate the PACK32 Vulkan formats.
-    Rgba8888 {
-        opaque: Rgbx8888,
-        alpha: true,
-        // #[cfg(target_endian = "little")]
-        // vk: A8B8G8R8_SRGB_PACK32,
-    },
-
-    Rgbx8888 {
-        alpha: false,
-        // #[cfg(target_endian = "little")]
-        // vk: A8B8G8R8_SRGB_PACK32,
-    },
-
-    Bgr888 {
-        alpha: false,
-        vk: R8G8B8_SRGB,
-    },
-
-    Rgb888 {
-        alpha: false,
-        vk: B8G8R8_SRGB,
-    },
-
-    R8 {
-        alpha: false,
-        vk: R8_SRGB,
-    },
-
-    Gr88 {
-        alpha: false,
-        vk: R8G8_SRGB,
-    },
-
-    // § 3.9.3. 16-Bit Floating-Point Numbers
-    //
-    // > 16-bit floating point numbers are defined in the “16-bit floating point numbers” section of the
-    // > Khronos Data Format Specification.
-    //
-    // The khronos data format defines a 16-bit floating point number as a half precision IEEE 754-2008 float
-    // (binary16).
-    //
-    // Since the DRM Fourcc formats that are floating point are also IEEE-754, Vulkan can represent some
-    // floating point Drm Fourcc formats.
-
-    Abgr16161616f {
-        opaque: Xbgr16161616f,
-        alpha: true,
-        vk: R16G16B16A16_SFLOAT,
-    },
-
-    Xbgr16161616f {
-        alpha: false,
-        vk: R16G16B16A16_SFLOAT,
+    if let Err(result) =
+        unsafe { instance.get_physical_device_image_format_properties2(phy, &format_info, &mut format_properties) }
+    {
+        if result != vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
+            Err(result.into())
+        } else {
+            // Unsupported format
+            Ok(None)
+        }
+    } else {
+        Ok(Some(external_mem_properties.external_memory_properties))
     }
 }
 
-pub fn fourcc_to_wl(
-    fourcc: smithay::backend::allocator::Fourcc,
-) -> Option<smithay::reexports::wayland_server::protocol::wl_shm::Format> {
-    match fourcc {
-        // Manual mapping for the two mandatory formats wl_shm defines.
-        //
-        // Every other format should be the same as the fourcc code.
-        smithay::backend::allocator::Fourcc::Argb8888 => {
-            Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::Argb8888)
+pub(crate) unsafe fn get_image_format_properties(
+    instance: &ash::Instance,
+    phy: vk::PhysicalDevice,
+    format: vk::Format,
+    usage: vk::ImageUsageFlags,
+    drm_format_info: Option<&mut vk::PhysicalDeviceImageDrmFormatModifierInfoEXT>,
+) -> Result<Option<vk::ImageFormatProperties>, VkError> {
+    let tiling = if drm_format_info.is_some() {
+        // VUID-VkPhysicalDeviceImageFormatInfo2-tiling-02249
+        vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT
+    } else {
+        vk::ImageTiling::OPTIMAL
+    };
+
+    let mut format_properties = vk::ImageFormatProperties2::builder();
+    let mut format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
+        .format(format)
+        .tiling(tiling)
+        .ty(vk::ImageType::TYPE_2D)
+        .usage(usage);
+
+    if let Some(drm_format_info) = drm_format_info {
+        format_info = format_info.push_next(drm_format_info);
+    }
+
+    if let Err(result) =
+        unsafe { instance.get_physical_device_image_format_properties2(phy, &format_info, &mut format_properties) }
+    {
+        if result != vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
+            Err(result.into())
+        } else {
+            // Unsupported format
+            Ok(None)
         }
-        smithay::backend::allocator::Fourcc::Xrgb8888 => {
-            Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::Xrgb8888)
+    } else {
+        Ok(Some(format_properties.image_format_properties))
+    }
+}
+
+// // Build the list of valid dmabuf and shm formats
+// let mut shm_formats: Vec<()> = vec![];
+// let mut dma_formats: Vec<()> = vec![];
+// let mut render_formats: Vec<()> = vec![];
+
+// let instance = unsafe { device.instance.raw() };
+
+// for code in format_convert::formats() {
+
+//         // for modifier_properties in modifiers {
+//         //     dma_formats.push(allocator::Format {
+//         //         code,
+//         //         modifier: allocator::Modifier::from(modifier_properties.drm_format_modifier),
+//         //     })
+//         // }
+//     }
+// }
+
+// //if modifier.drm_format_modifier_tiling_features.contains(TEXTURE_FEATURES) {
+// // TODO: Ensure the shm requirements are fully met
+// //    println!("{} - TEXTURE", code);
+// //}
+
+// // // Ensure the shm renderer contains the mandatory formats
+// // if !shm_formats.iter().any(|format| format == &wl_shm::Format::Argb8888) {
+// //     todo!("Missing argb8888")
+// // }
+
+// // // Ensure the shm renderer contains the mandatory formats
+// // if !shm_formats.iter().any(|format| format == &wl_shm::Format::Xrgb8888) {
+// //     todo!("Missing xrgb8888")
+// // }
+
+impl VulkanRenderer {
+    pub(crate) fn load_formats(&mut self) -> Result<(), VkError> {
+        let instance = self.device.instance.raw();
+        let phy = self.device.phy;
+
+        for format in formats() {
+            if let Some((vk_format, _)) = fourcc_to_vk(format) {
+                // SAFETY: We have asserted VK_EXT_image_drm_format_modifier is present.
+                let modifiers = unsafe { get_format_modifiers(instance, phy, vk_format) };
+
+                // Check if the modifiers support specific types of usages.
+                for modifier in modifiers {
+                    // Rendering
+                    if modifier.drm_format_modifier_tiling_features.contains(RENDER_FEATURES) {
+                        if let Some(external_memory_features) =
+                            unsafe { get_external_image_properties(instance, phy, vk_format, RENDER_USAGE) }?
+                        {
+                            // if external_memory_features
+                            // .external_memory_features
+                            // .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
+                            // {
+                            println!("{} ({}) - RENDER", format, modifier.drm_format_modifier);
+                            //}
+                        }
+                    }
+
+                    // Dmabuf
+                    if modifier
+                        .drm_format_modifier_tiling_features
+                        .contains(DMA_TEXTURE_FEATURES)
+                    {
+                        if let Some(external_memory_features) =
+                            unsafe { get_external_image_properties(instance, phy, vk_format, DMA_TEXTURE_USAGE) }?
+                        {
+                            // if external_memory_features
+                            // .external_memory_features
+                            // .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
+                            // {
+                            println!("{} ({}) - DMA_TEXTURE", format, modifier.drm_format_modifier);
+                            //}
+                        }
+                    }
+                }
+
+                // Memory
+                // TODO: Use `_image_format_properties` for info like max extent
+                if let Some(_image_format_properties) =
+                    unsafe { get_image_format_properties(instance, phy, vk_format, TEXTURE_USAGE, None) }?
+                {
+                    let mut format_properties = vk::FormatProperties2::default();
+                    unsafe { instance.get_physical_device_format_properties2(phy, vk_format, &mut format_properties) };
+
+                    if format_properties
+                        .format_properties
+                        .optimal_tiling_features
+                        .contains(TEXTURE_FEATURES)
+                    {
+                        println!("{} - TEXTURE", format);
+                    }
+                }
+            }
         }
 
-        fourcc => smithay::reexports::wayland_server::protocol::wl_shm::Format::from_raw(fourcc as u32),
+        // Ensure the shm renderer has the mandatory formats.
+        // TODO
+
+        Ok(())
     }
 }

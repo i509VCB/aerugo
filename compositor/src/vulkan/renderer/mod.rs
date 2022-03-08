@@ -1,9 +1,10 @@
 mod format;
+mod format_convert;
 mod render_pass;
 
 use std::{collections::HashSet, sync::Arc};
 
-use ash::vk::{self, CommandBufferAllocateInfo, CommandPoolCreateInfo, DrmFormatModifierPropertiesListEXT};
+use ash::vk::{self, CommandBufferAllocateInfo, CommandPoolCreateInfo};
 use smithay::{
     backend::{
         allocator::{self, dmabuf::Dmabuf},
@@ -91,14 +92,13 @@ pub struct VulkanRenderer {
     /// Since a vulkan renderer owns some vulkan objects, we need this handle to ensure objects do not outlive
     /// the renderer.
     device: Arc<DeviceHandle>,
-    /// Format and modifier pairs the renderer may import a dmabuf using.
-    dma_formats: HashSet<allocator::Format>,
-    /// Formats the renderer may import shared memory using.
-    shm_formats: Vec<wl_shm::Format>,
 }
 
 impl VulkanRenderer {
     /// Returns a list of device extensions the device must enable to use a [`VulkanRenderer`].
+    ///
+    /// This list satisfies the requirement that all enabled extensions also enable their dependencies
+    /// (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`).
     pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], ()> {
         if version >= Version::VERSION_1_2 {
             Ok(&[
@@ -111,7 +111,7 @@ impl VulkanRenderer {
                 "VK_KHR_external_memory_fd",
                 "VK_EXT_external_memory_dma_buf",
                 "VK_EXT_image_drm_format_modifier",
-                // Promoted in Vulkan 1.2
+                // Promoted in Vulkan 1.2, enabled here to satisfy VUID-vkCreateDevice-ppEnabledExtensionNames-01387.
                 "VK_KHR_image_format_list",
             ])
         } else {
@@ -125,6 +125,7 @@ impl VulkanRenderer {
         // Verify the required extensions are supported.
         let version = device.version();
 
+        // VUID-vkCreateDevice-ppEnabledExtensionNames-01387
         if !Self::required_device_extensions(version)
             .expect("TODO Error type no version")
             .iter()
@@ -137,7 +138,7 @@ impl VulkanRenderer {
         let pool_info = CommandPoolCreateInfo::builder().queue_family_index(device.queue_family_index() as u32);
 
         let device = device.handle();
-        let raw_device = unsafe { device.raw() };
+        let raw_device = device.raw();
 
         let command_pool = unsafe { raw_device.create_command_pool(&pool_info, None) }.map_err(VkError::from)?;
 
@@ -153,79 +154,16 @@ impl VulkanRenderer {
             .next()
             .unwrap();
 
-        // Build the list of valid dmabuf and shm formats
-        let mut shm_formats = vec![];
-        let dma_formats = {
-            let instance = unsafe { device.instance.raw() };
-            let mut dma_formats = vec![];
-
-            for code in format::formats() {
-                if let Some((vk, _)) = format::fourcc_to_vk(code) {
-                    // First we need to query how many entries are available.
-                    let mut formats_ext = DrmFormatModifierPropertiesListEXT::builder();
-                    let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats_ext);
-
-                    // SAFETY: VK_EXT_image_drm_format_modifier is enabled
-                    // Null pointer for pDrmFormatModifierProperties is safe when obtaining count.
-                    unsafe {
-                        instance.get_physical_device_format_properties2(device.physical, vk, &mut properties2);
-                    }
-
-                    // Immediately end the mutable borrow on `formats_ext` in order to ensure the formats_ext is accessible.
-                    drop(properties2);
-
-                    let modifier_count = formats_ext.drm_format_modifier_count as usize;
-                    let mut modifiers = Vec::with_capacity(modifier_count);
-                    formats_ext = formats_ext.drm_format_modifier_properties(&mut modifiers[..]);
-
-                    // Now we can create a new struct since the fields are filled in on the extension.
-                    let mut properties2 = vk::FormatProperties2::builder().push_next(&mut formats_ext);
-
-                    // Initialize the value
-                    unsafe {
-                        instance.get_physical_device_format_properties2(device.physical, vk, &mut properties2);
-
-                        // SAFETY: Elements from 0..len() were just initialized.
-                        modifiers.set_len(modifier_count);
-                    }
-
-                    // If a format has some number of modifiers, then we can import wl_shm buffers for the
-                    // format.
-                    if !modifiers.is_empty() {
-                        if let Some(format) = format::fourcc_to_wl(code) {
-                            shm_formats.push(format);
-                        }
-                    }
-
-                    for modifier_properties in modifiers {
-                        dma_formats.push(allocator::Format {
-                            code,
-                            modifier: allocator::Modifier::from(modifier_properties.drm_format_modifier),
-                        })
-                    }
-                }
-            }
-
-            HashSet::from_iter(dma_formats.into_iter())
-        };
-
-        // Ensure the shm renderer contains the mandatory formats
-        if !shm_formats.iter().any(|format| format == &wl_shm::Format::Argb8888) {
-            todo!("Missing argb8888")
-        }
-
-        // Ensure the shm renderer contains the mandatory formats
-        if !shm_formats.iter().any(|format| format == &wl_shm::Format::Xrgb8888) {
-            todo!("Missing xrgb8888")
-        }
-
-        Ok(VulkanRenderer {
+        let mut renderer = VulkanRenderer {
             command_buffer,
             command_pool,
             device,
-            dma_formats,
-            shm_formats,
-        })
+        };
+
+        // Check which formats the renderer supports
+        renderer.load_formats()?;
+
+        Ok(renderer)
     }
 
     pub fn device(&self) -> Arc<DeviceHandle> {
@@ -267,7 +205,7 @@ impl Bind<Dmabuf> for VulkanRenderer {
     }
 
     fn supported_formats(&self) -> Option<HashSet<allocator::Format>> {
-        Some(self.dma_formats.clone())
+        todo!()
     }
 }
 
@@ -285,7 +223,7 @@ impl ImportDma for VulkanRenderer {
     }
 
     fn dmabuf_formats<'a>(&'a self) -> Box<dyn Iterator<Item = &'a allocator::Format> + 'a> {
-        Box::new(self.dma_formats.iter())
+        todo!()
     }
 }
 
@@ -300,13 +238,13 @@ impl ImportShm for VulkanRenderer {
     }
 
     fn shm_formats(&self) -> &[wl_shm::Format] {
-        &self.shm_formats[..]
+        todo!()
     }
 }
 
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
-        let raw = unsafe { self.device.raw() };
+        let raw = self.device.raw();
 
         // Destruction of objects must happen in the opposite order they are created.
         unsafe {
@@ -317,4 +255,52 @@ impl Drop for VulkanRenderer {
 
         // Finally, we let the implicit drop of `Arc<DeviceHandle>` free the device if no other handles exist.
     }
+}
+
+/// Returns properties about the specified image format.
+///
+/// If [`None`] is returned, then the device does not support the specified image format.
+///
+/// # Safety
+///
+/// Per the valid usage requirement `VUID-VkPhysicalDeviceImageFormatInfo2-usage-requiredbitmask`, the usage
+/// must be specified.
+///
+/// If `drm_modifier_info` is [`Some`], then the device must support the `VK_EXT_image_drm_format_modifier`
+/// extension.
+unsafe fn get_image_format_properties(
+    format: vk::Format,
+    usage: vk::ImageUsageFlags,
+    instance: &ash::Instance,
+    physical: vk::PhysicalDevice,
+    drm_modifier_info: Option<&mut vk::PhysicalDeviceImageDrmFormatModifierInfoEXT>,
+) -> Result<Option<vk::ImageFormatProperties>, Error> {
+    // instance.get_physical_device_image_format_properties2
+
+    let mut format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
+        .ty(vk::ImageType::TYPE_2D)
+        .format(format)
+        .tiling(vk::ImageTiling::OPTIMAL)
+        .usage(usage);
+
+    let mut image_format_properties = vk::ImageFormatProperties2::builder();
+
+    if let Some(drm_modifier_info) = drm_modifier_info {
+        format_info = format_info.push_next(drm_modifier_info);
+    }
+
+    if let Err(result) = unsafe {
+        instance.get_physical_device_image_format_properties2(physical, &format_info, &mut image_format_properties)
+    } {
+        return if result != vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
+            Err(Error::Vk(VkError::from(result)))
+        } else {
+            // Unsupported format
+            Ok(None)
+        };
+    }
+
+    let format_properties = image_format_properties.image_format_properties;
+
+    Ok(Some(format_properties))
 }

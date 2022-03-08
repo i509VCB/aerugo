@@ -16,7 +16,7 @@ pub use self::error::*;
 
 pub struct DeviceHandle {
     device: ash::Device,
-    pub(crate) physical: ash::vk::PhysicalDevice,
+    pub(crate) phy: ash::vk::PhysicalDevice,
     queue_family_index: usize,
     queue: ash::vk::Queue,
     version: Version,
@@ -27,17 +27,22 @@ pub struct DeviceHandle {
 impl DeviceHandle {
     /// Returns a reference to the underlying [`ash::Device`].
     ///
-    /// # Safety
-    /// - Callers must NOT destroy the returned device.
-    /// - Child objects created using the device must not outlive the device
-    /// (`VUID-vkDestroyDevice-device-00378`).
+    /// Take care when using the underlying type, since all the valid usage requirements in the Vulkan
+    /// specification apply.
     ///
-    /// These safety requirements may be checked by enabling validation layers.
-    pub unsafe fn raw(&self) -> &ash::Device {
+    /// In particular, keep in mind that child objects created using the device must not outlive the
+    /// device (`VUID-vkDestroyDevice-device-00378`).
+    ///
+    /// The valid usage requirements may be checked by enabling validation layers.
+    pub fn raw(&self) -> &ash::Device {
         &self.device
     }
 
-    pub unsafe fn queue(&self) -> &ash::vk::Queue {
+    pub fn phy(&self) -> &ash::vk::PhysicalDevice {
+        &self.phy
+    }
+
+    pub fn queue(&self) -> &ash::vk::Queue {
         &self.queue
     }
 
@@ -98,8 +103,18 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     }
 
     /// Returns a new device using the parameters passed into the builder.
-    pub fn build(self) -> Result<Device, DeviceError> {
-        // Use DevicePrivateDataCreateInfoEXT as a dummy generic for monomorphization.
+    ///
+    /// # Safety
+    ///
+    /// The valid usage requirement for vkCreateDevice, `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`,
+    /// states all enabled extensions must also enable the require dependencies.
+    ///
+    /// https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#extendingvulkan-extensions-extensiondependencies
+    pub unsafe fn build(self) -> Result<Device, DeviceError> {
+        // SAFETY(VUID-VkDeviceCreateInfo-pNext-pNext): None means the pNext field is a null pointer
+        //
+        // DevicePrivateDataCreateInfoEXT is used for monomorphization purposes. None is passed as the
+        // extension, so the generic should be ignored.
         unsafe { self.build_impl::<DevicePrivateDataCreateInfoEXT>(None) }
     }
 
@@ -110,20 +125,21 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     ///
     /// # Safety
     ///
-    /// The extension struct must be in compliance with the Vulkan specification.
+    /// The valid usage requirement for vkCreateDevice, `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`,
+    /// states all enabled extensions must also enable the require dependencies.
+    ///
+    /// The extension struct must conform to valid usage requirements in the Vulkan specification.
     pub unsafe fn build_with_extension<T: ExtendsDeviceCreateInfo>(
         self,
         extension: &mut T,
     ) -> Result<Device, DeviceError> {
-        // SAFETY: Caller guaranteed the extension structs are compliant.
+        // SAFETY: Caller guarantees extensions conform to valid usage requirements.
         unsafe { self.build_impl(Some(extension)) }
     }
 
     unsafe fn build_impl<E: ExtendsDeviceCreateInfo>(self, extension: Option<&mut E>) -> Result<Device, DeviceError> {
         let instance_handle = self.device.instance().handle();
-        // SAFETY: The Arc<InstanceHandle> stored in the device guarantees the device will not outlive the
-        // instance.
-        let raw_instance = unsafe { instance_handle.raw() };
+        let raw_instance = instance_handle.raw();
 
         // Select an appropriate queue.
         //
@@ -131,8 +147,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
         // want to change for the future.
         let queue_families = unsafe { raw_instance.get_physical_device_queue_family_properties(self.device.handle()) };
 
-        // Per the Vulkan specification, if the capabilities include graphics, the queue MUST also support
-        // transfer operations.
+        // If the capabilities include graphics, the queue must also support transfer operations.
         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VkQueueFlags
         let (queue_family_index, _) = queue_families
             .iter()
@@ -165,8 +180,10 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
             create_info = create_info.enabled_features(features);
         }
 
-        // SAFETY: The Arc<InstanceHandle> stored in the device guarantees the device will not outlive the
-        // instance.
+        // SAFETY(VUID-vkDestroyInstance-instance-00629): The Arc<InstanceHandle> stored in the device
+        // guarantees the device will not outlive the instance.
+        //
+        // SAFETY(VUID-vkCreateDevice-ppEnabledExtensionNames-01387): The caller has guaranteed the requirements.
         let device =
             unsafe { raw_instance.create_device(self.device.handle(), &create_info, None) }.map_err(VkError::from)?;
 
@@ -175,7 +192,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
 
         let inner = Arc::new(DeviceHandle {
             device,
-            physical: unsafe { self.device.handle() },
+            phy: unsafe { self.device.handle() },
             queue_family_index,
             queue,
             version: self.device.version(),
@@ -227,24 +244,23 @@ impl Device {
     ///
     /// The Vulkan API enforces a strict lifetimes over objects that are created, meaning child objects
     /// cannot outlive their device. A great way to ensure the device will live long enough is storing a
-    /// handle inside the container of child objects.
-    ///
-    /// Since a device is a child object of a [`Instance`], storing a handle also ensures child objects do not
-    /// outlive the instance.
+    /// handle inside the container of child objects. This handle will automatically destroy the device
+    /// when the reference count reaches zero.
     pub fn handle(&self) -> Arc<DeviceHandle> {
         self.0.clone()
     }
 
     /// Returns a reference to the underlying [`ash::Device`].
     ///
-    /// # Safety
-    /// - Callers must NOT destroy the returned device.
-    /// - Child objects created using the device must not outlive the device
-    /// (`VUID-vkDestroyDevice-device-00378`).
+    /// Take care when using the underlying type, since all the valid usage requirements in the Vulkan
+    /// specification apply.
     ///
-    /// These safety requirements may be checked by enabling validation layers.
-    pub unsafe fn raw(&self) -> &ash::Device {
-        unsafe { self.0.raw() }
+    /// In particular, keep in mind that child objects created using the device must not outlive the
+    /// device (`VUID-vkDestroyDevice-device-00378`).
+    ///
+    /// The valid usage requirements may be checked by enabling validation layers.
+    pub fn raw(&self) -> &ash::Device {
+        self.0.raw()
     }
 
     pub fn queue_family_index(&self) -> usize {
