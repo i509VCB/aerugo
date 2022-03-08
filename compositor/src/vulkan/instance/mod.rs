@@ -137,7 +137,7 @@ impl InstanceBuilder {
     /// # Safety
     ///
     /// The valid usage requirement for vkCreateInstance, `VUID-vkCreateInstance-ppEnabledExtensionNames-01388`,
-    /// states all enabled extensions must also enable the require dependencies.
+    /// states all enabled extensions must also enable the required dependencies.
     pub unsafe fn build(self) -> Result<Instance, InstanceError> {
         // We require at least Vulkan 1.1
         if self.api_version < Version::VERSION_1_1 {

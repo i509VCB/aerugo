@@ -107,7 +107,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     /// # Safety
     ///
     /// The valid usage requirement for vkCreateDevice, `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`,
-    /// states all enabled extensions must also enable the require dependencies.
+    /// states all enabled extensions must also enable the required dependencies.
     ///
     /// <https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#extendingvulkan-extensions-extensiondependencies>
     pub unsafe fn build(self) -> Result<Device, DeviceError> {
@@ -126,7 +126,7 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     /// # Safety
     ///
     /// The valid usage requirement for vkCreateDevice, `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`,
-    /// states all enabled extensions must also enable the require dependencies.
+    /// states all enabled extensions must also enable the required dependencies.
     ///
     /// The extension struct must conform to valid usage requirements in the Vulkan specification.
     pub unsafe fn build_with_extension<T: ExtendsDeviceCreateInfo>(
