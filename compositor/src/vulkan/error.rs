@@ -3,7 +3,7 @@ use std::fmt;
 use ash::vk;
 
 /// Type representing a Vulkan API error.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
 pub struct VkError {
     #[source]
     err: vk::Result,

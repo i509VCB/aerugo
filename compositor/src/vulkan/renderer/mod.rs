@@ -1,6 +1,7 @@
 mod format;
 mod format_convert;
 mod render_pass;
+mod upload;
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -26,6 +27,9 @@ use super::{
 pub enum Error {
     #[error(transparent)]
     Vk(#[from] VkError),
+
+    #[error("required extensions are not enabled")]
+    MissingRequiredExtensions,
 }
 
 #[derive(Debug)]
@@ -88,19 +92,34 @@ impl Frame for VulkanFrame {
 pub struct VulkanRenderer {
     command_buffer: vk::CommandBuffer,
     command_pool: vk::CommandPool,
+
+    /// Whether this renderer may import or export some [`Dmabuf`].
+    ///
+    /// This is only true if the following extensions are enabled on the device:
+    /// * `VK_KHR_external_memory_fd`
+    /// * `VK_EXT_external_memory_dma_buf`
+    ///
+    /// If this is false, all dmabuf import and export functions will fail.
+    supports_dma: bool,
+
     /// The device handle.
     ///
-    /// Since a vulkan renderer owns some vulkan objects, we need this handle to ensure objects do not outlive
+    /// Since a Vulkan renderer owns some Vulkan objects, we need this handle to ensure objects do not outlive
     /// the renderer.
     device: Arc<DeviceHandle>,
 }
 
 impl VulkanRenderer {
-    /// Returns a list of device extensions the device must enable to use a [`VulkanRenderer`].
+    /// Returns a list of device extensions the device must enable to use a [`VulkanRenderer`] most optimally.
+    ///
+    /// This set of extensions is required in order to use a [`Dmabuf`] for import or export into the renderer.
+    ///
+    /// If the device does not support all of the specified extensions, a smaller extension subset in
+    /// [`VulkanRenderer::required_device_extensions`] may be used instead.
     ///
     /// This list satisfies the requirement that all enabled extensions also enable their dependencies
     /// (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`).
-    pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], UnsupportedVulkanVersion> {
+    pub fn optimal_device_extensions(version: Version) -> Result<&'static [&'static str], UnsupportedVulkanVersion> {
         if version >= Version::VERSION_1_2 {
             Ok(&[
                 "VK_KHR_external_memory_fd",
@@ -111,6 +130,28 @@ impl VulkanRenderer {
             Ok(&[
                 "VK_KHR_external_memory_fd",
                 "VK_EXT_external_memory_dma_buf",
+                "VK_EXT_image_drm_format_modifier",
+                // Promoted in Vulkan 1.2, enabled here to satisfy VUID-vkCreateDevice-ppEnabledExtensionNames-01387.
+                "VK_KHR_image_format_list",
+            ])
+        } else {
+            Err(UnsupportedVulkanVersion)
+        }
+    }
+
+    /// Returns a list of the device extensions the device must enable to use a [`VulkanRenderer`].
+    ///
+    /// This extension list contains the absolute minimum requirements for the renderer. Note that a renderer
+    /// constructed from a device with these extensions enabled will be unable to use a [`Dmabuf`] for import
+    /// or export.
+    ///
+    /// This list satisfies the requirement that all enabled extensions also enable their dependencies
+    /// (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`).
+    pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], UnsupportedVulkanVersion> {
+        if version >= Version::VERSION_1_2 {
+            Ok(&["VK_EXT_image_drm_format_modifier"])
+        } else if version >= Version::VERSION_1_1 {
+            Ok(&[
                 "VK_EXT_image_drm_format_modifier",
                 // Promoted in Vulkan 1.2, enabled here to satisfy VUID-vkCreateDevice-ppEnabledExtensionNames-01387.
                 "VK_KHR_image_format_list",
@@ -132,8 +173,14 @@ impl VulkanRenderer {
             .iter()
             .all(|extension| device.is_extension_enabled(extension))
         {
-            todo!("Missing required extensions error")
+            return Err(Error::MissingRequiredExtensions);
         }
+
+        // Test if the renderer supports Dmabuf external memory.
+        let supports_dma = Self::optimal_device_extensions(version)
+            .unwrap()
+            .iter()
+            .all(|extension| device.is_extension_enabled(extension));
 
         // Create the command pool for Vulkan
         let pool_info = CommandPoolCreateInfo::builder().queue_family_index(device.queue_family_index() as u32);
@@ -158,6 +205,7 @@ impl VulkanRenderer {
         let mut renderer = VulkanRenderer {
             command_buffer,
             command_pool,
+            supports_dma,
             device,
         };
 
@@ -256,52 +304,4 @@ impl Drop for VulkanRenderer {
 
         // Finally, we let the implicit drop of `Arc<DeviceHandle>` free the device if no other handles exist.
     }
-}
-
-/// Returns properties about the specified image format.
-///
-/// If [`None`] is returned, then the device does not support the specified image format.
-///
-/// # Safety
-///
-/// Per the valid usage requirement `VUID-VkPhysicalDeviceImageFormatInfo2-usage-requiredbitmask`, the usage
-/// must be specified.
-///
-/// If `drm_modifier_info` is [`Some`], then the device must support the `VK_EXT_image_drm_format_modifier`
-/// extension.
-unsafe fn get_image_format_properties(
-    format: vk::Format,
-    usage: vk::ImageUsageFlags,
-    instance: &ash::Instance,
-    physical: vk::PhysicalDevice,
-    drm_modifier_info: Option<&mut vk::PhysicalDeviceImageDrmFormatModifierInfoEXT>,
-) -> Result<Option<vk::ImageFormatProperties>, Error> {
-    // instance.get_physical_device_image_format_properties2
-
-    let mut format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
-        .ty(vk::ImageType::TYPE_2D)
-        .format(format)
-        .tiling(vk::ImageTiling::OPTIMAL)
-        .usage(usage);
-
-    let mut image_format_properties = vk::ImageFormatProperties2::builder();
-
-    if let Some(drm_modifier_info) = drm_modifier_info {
-        format_info = format_info.push_next(drm_modifier_info);
-    }
-
-    if let Err(result) = unsafe {
-        instance.get_physical_device_image_format_properties2(physical, &format_info, &mut image_format_properties)
-    } {
-        return if result != vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
-            Err(Error::Vk(VkError::from(result)))
-        } else {
-            // Unsupported format
-            Ok(None)
-        };
-    }
-
-    let format_properties = image_format_properties.image_format_properties;
-
-    Ok(Some(format_properties))
 }

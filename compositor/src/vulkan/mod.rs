@@ -126,7 +126,7 @@ mod test {
         }
 
         let mut device_builder = Device::builder(&physical);
-        let req_extensions = VulkanRenderer::required_device_extensions(Version::VERSION_1_1).unwrap();
+        let req_extensions = VulkanRenderer::optimal_device_extensions(Version::VERSION_1_1).unwrap();
 
         for extension in req_extensions {
             device_builder = device_builder.extension(*extension);
