@@ -90,6 +90,8 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 mod test {
     use std::error::Error;
 
+    use smithay::backend::renderer::Renderer;
+
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
     use super::{instance::Instance, physical_device::PhysicalDevice, VALIDATION_LAYER_NAME};

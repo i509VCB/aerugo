@@ -166,7 +166,7 @@ pub struct VulkanRenderer {
     render_command_buffer: vk::CommandBuffer,
 
     /// Fence used to signal all submitted command buffers have completed execution.
-    render_submit_fence: vk::Fence,
+    submit_fence: vk::Fence,
 
     /// Currently bound render target.
     ///
@@ -312,7 +312,7 @@ impl VulkanRenderer {
             staging_command_buffer,
             recording_staging_buffer: false,
             render_command_buffer,
-            render_submit_fence,
+            submit_fence: render_submit_fence,
             target: None,
             // vert_shader: todo!(),
             // tex_frag_shader: todo!(),
@@ -357,19 +357,19 @@ impl Renderer for VulkanRenderer {
     where
         F: FnOnce(&mut Self, &mut Self::Frame) -> R,
     {
+        // Vulkan requires a target to render to
         if self.target.is_none() {
             return Err(Error::NoTargetFramebuffer);
         }
 
         let device = self.device.raw();
 
-        // Vulkan requires a bound render target:
-        // TODO
-
         // Enter a recording state
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::empty());
 
         unsafe { device.begin_command_buffer(self.render_command_buffer, &begin_info) }.map_err(VkError::from)?;
+
+        // TODO: Then begin the renderpass
 
         let mut frame = VulkanFrame {
             command_buffer: self.render_command_buffer,
@@ -379,10 +379,33 @@ impl Renderer for VulkanRenderer {
 
         // TODO: Set scissor box before invoking callback.
 
+        // Now the frame may issue draw commands.
         let result = rendering(self, &mut frame);
 
-        // Submit to queue.
-        todo!()
+        // TODO: End renderpass
+        // VUID-vkEndCommandBuffer-commandBuffer-00060
+
+        // Then complete recording a command buffer.
+        // This makes the command buffer executable now.
+        unsafe { device.end_command_buffer(self.render_command_buffer) }.map_err(VkError::from)?;
+
+        let mut submits = Vec::with_capacity(2);
+
+        // TODO: This appears to not need a semaphore between stage/transfer because a renderpass dependency
+        // is used.
+        if self.recording_staging_buffer {
+            unsafe { device.end_command_buffer(self.staging_command_buffer) }.map_err(VkError::from)?;
+            self.recording_staging_buffer = false;
+        }
+
+        // Submit commands to the queue for execution.
+        unsafe { device.queue_submit(*self.device().queue(), &submits[..], self.submit_fence) }
+            .map_err(VkError::from)?;
+
+        // TODO: There is probably a better way to do this than to wait for the fence to complete. This needs
+        // further thought.
+
+        Ok(result)
     }
 }
 
@@ -457,7 +480,7 @@ impl Drop for VulkanRenderer {
 
             // VUID-vkDestroyFence-fence-01120: All queue submission commands for fence have completed since the fence
             // must be signalled before exiting the rendering functions.
-            device.destroy_fence(self.render_submit_fence, None);
+            device.destroy_fence(self.submit_fence, None);
         }
     }
 }
