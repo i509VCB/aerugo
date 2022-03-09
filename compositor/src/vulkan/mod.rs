@@ -139,6 +139,7 @@ mod test {
         //println!("DMA {:#?}", renderer.dmabuf_formats().collect::<Vec<_>>());
         //println!("SHM {:#?}", renderer.shm_formats());
 
+        drop(renderer);
         drop(device);
         drop(instance);
 

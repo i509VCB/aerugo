@@ -1,9 +1,11 @@
 mod format;
 mod format_convert;
 mod render_pass;
-mod upload;
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use ash::vk::{self, CommandBufferAllocateInfo, CommandPoolCreateInfo};
 use smithay::{
@@ -28,8 +30,14 @@ pub enum Error {
     #[error(transparent)]
     Vk(#[from] VkError),
 
+    #[error(transparent)]
+    Version(#[from] UnsupportedVulkanVersion),
+
     #[error("required extensions are not enabled")]
     MissingRequiredExtensions,
+
+    #[error("no target framebuffer to render to, to bind a framebuffer, use `VulkanRenderer::bind`")]
+    NoTargetFramebuffer,
 }
 
 #[derive(Debug)]
@@ -60,15 +68,65 @@ impl Texture for VulkanTexture {
 }
 
 #[derive(Debug)]
-pub struct VulkanFrame {}
+pub struct VulkanFrame {
+    command_buffer: vk::CommandBuffer,
+    render_pass: vk::RenderPass,
+    device: Arc<DeviceHandle>,
+}
 
 impl Frame for VulkanFrame {
     type Error = Error;
 
     type TextureId = VulkanTexture;
 
-    fn clear(&mut self, _color: [f32; 4], _at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
-        todo!()
+    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+        // VUID-vkCmdClearAttachments-rectCount-arraylength
+        if at.is_empty() {
+            return Ok(());
+        }
+
+        // TODO: VUID-vkCmdClearAttachments-rect-02682 + VUID-vkCmdClearAttachments-rect-02683, extent w, h must be > 0.
+        // TODO: VUID-vkCmdClearAttachments-pRects-00016, regions specified must be within render area of the render pass
+
+        // TODO: What colorspace is float32 in?
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue { float32: color },
+        };
+
+        let attachments = [vk::ClearAttachment::builder()
+            .clear_value(clear_value)
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            // VUID-vkCmdClearAttachments-aspectMask-02501
+            .color_attachment(vk::ATTACHMENT_UNUSED)
+            .build()];
+
+        let rects = at
+            .iter()
+            .map(|rect| {
+                let offset = vk::Offset2D::builder().x(rect.loc.x).y(rect.loc.y).build();
+
+                let extent = vk::Extent2D::builder()
+                    .width(rect.size.w as u32)
+                    .height(rect.size.h as u32)
+                    .build();
+
+                let rect = vk::Rect2D::builder().offset(offset).extent(extent).build();
+
+                vk::ClearRect::builder()
+                    // VUID-vkCmdClearAttachments-layerCount-01934
+                    .layer_count(1)
+                    .rect(rect)
+                    .build()
+            })
+            .collect::<Vec<_>>();
+
+        unsafe {
+            self.device
+                .raw()
+                .cmd_clear_attachments(self.command_buffer, &attachments[..], &rects[..])
+        };
+
+        Ok(())
     }
 
     fn render_texture_from_to(
@@ -90,9 +148,41 @@ impl Frame for VulkanFrame {
 
 #[derive(Debug)]
 pub struct VulkanRenderer {
-    command_buffer: vk::CommandBuffer,
+    /// Command pool used to allocate the staging and rendering command buffers.
     command_pool: vk::CommandPool,
 
+    /// Staging command buffer.
+    ///
+    /// This command buffer is used when textures need to be uploaded to the GPU.
+    staging_command_buffer: vk::CommandBuffer,
+
+    /// Whether the staging command buffer is recording commands.
+    recording_staging_buffer: bool,
+
+    /// Rendering command buffer.
+    ///
+    /// The render command buffer has a dependency on the staging command buffer, meaning any texture imports
+    /// will always complete before the render command buffer starts executing commands.
+    render_command_buffer: vk::CommandBuffer,
+
+    /// Fence used to signal all submitted command buffers have completed execution.
+    render_submit_fence: vk::Fence,
+
+    /// Currently bound render target.
+    ///
+    /// Rendering will fail if the render target is not set.
+    target: Option<RenderTarget>,
+
+    /// All the graphics pipelines created by the renderer.
+    ///
+    /// Each render pass may only have attachments of the matching format, so we need to construct a
+    /// renderpass and by proxy a pipeline for each format.
+    pipelines: HashMap<vk::Format, GraphicsPipeline>,
+
+    // Shaders
+    // vert_shader: vk::ShaderModule,
+    // tex_frag_shader: vk::ShaderModule,
+    // quad_frag_shader: vk::ShaderModule,
     /// Whether this renderer may import or export some [`Dmabuf`].
     ///
     /// This is only true if the following extensions are enabled on the device:
@@ -168,8 +258,7 @@ impl VulkanRenderer {
         let version = device.version();
 
         // VUID-vkCreateDevice-ppEnabledExtensionNames-01387
-        if !Self::required_device_extensions(version)
-            .expect("TODO Error type no version")
+        if !Self::required_device_extensions(version)?
             .iter()
             .all(|extension| device.is_extension_enabled(extension))
         {
@@ -182,29 +271,53 @@ impl VulkanRenderer {
             .iter()
             .all(|extension| device.is_extension_enabled(extension));
 
-        // Create the command pool for Vulkan
-        let pool_info = CommandPoolCreateInfo::builder().queue_family_index(device.queue_family_index() as u32);
-
         let device = device.handle();
         let raw_device = device.raw();
 
-        let command_pool = unsafe { raw_device.create_command_pool(&pool_info, None) }.map_err(VkError::from)?;
+        // TODO: Shaders and etc
 
-        // Create the command buffers
-        let command_buffer_info = CommandBufferAllocateInfo::builder()
+        // Create the command pool for Vulkan
+        let command_pool_info = CommandPoolCreateInfo::builder().queue_family_index(device.queue_family_index() as u32);
+        let command_pool =
+            unsafe { raw_device.create_command_pool(&command_pool_info, None) }.map_err(VkError::from)?;
+
+        let fence_create_info = vk::FenceCreateInfo::builder();
+        let render_submit_fence =
+            unsafe { raw_device.create_fence(&fence_create_info, None) }.map_err(VkError::from)?;
+
+        // Render command buffer
+        let render_buffer_info = CommandBufferAllocateInfo::builder()
             .command_pool(command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(1);
+        let render_command_buffer = unsafe { raw_device.allocate_command_buffers(&render_buffer_info) }
+            .map_err(VkError::from)?
+            .into_iter()
+            .next()
+            .unwrap();
 
-        let command_buffer = unsafe { raw_device.allocate_command_buffers(&command_buffer_info) }
+        // Staging command buffer
+        let staging_buffer_info = CommandBufferAllocateInfo::builder()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        let staging_command_buffer = unsafe { raw_device.allocate_command_buffers(&staging_buffer_info) }
             .map_err(VkError::from)?
             .into_iter()
             .next()
             .unwrap();
 
         let mut renderer = VulkanRenderer {
-            command_buffer,
             command_pool,
+            staging_command_buffer,
+            recording_staging_buffer: false,
+            render_command_buffer,
+            render_submit_fence,
+            target: None,
+            // vert_shader: todo!(),
+            // tex_frag_shader: todo!(),
+            // quad_frag_shader: todo!(),
+            pipelines: HashMap::new(),
             supports_dma,
             device,
         };
@@ -239,11 +352,36 @@ impl Renderer for VulkanRenderer {
         &mut self,
         _size: Size<i32, Physical>,
         _dst_transform: Transform,
-        _rendering: F,
+        rendering: F,
     ) -> Result<R, Self::Error>
     where
         F: FnOnce(&mut Self, &mut Self::Frame) -> R,
     {
+        if self.target.is_none() {
+            return Err(Error::NoTargetFramebuffer);
+        }
+
+        let device = self.device.raw();
+
+        // Vulkan requires a bound render target:
+        // TODO
+
+        // Enter a recording state
+        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::empty());
+
+        unsafe { device.begin_command_buffer(self.render_command_buffer, &begin_info) }.map_err(VkError::from)?;
+
+        let mut frame = VulkanFrame {
+            command_buffer: self.render_command_buffer,
+            render_pass: todo!(),
+            device: self.device(),
+        };
+
+        // TODO: Set scissor box before invoking callback.
+
+        let result = rendering(self, &mut frame);
+
+        // Submit to queue.
         todo!()
     }
 }
@@ -262,7 +400,14 @@ impl Bind<Dmabuf> for VulkanRenderer {
 
 impl Unbind for VulkanRenderer {
     fn unbind(&mut self) -> Result<(), Self::Error> {
-        todo!()
+        if let Some(target) = self.target.take() {
+            unsafe {
+                // TODO: VUID-vkDestroyFramebuffer-framebuffer-00892
+                self.device.raw().destroy_framebuffer(target.framebuffer, None);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -293,15 +438,72 @@ impl ImportShm for VulkanRenderer {
 
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
-        let raw = self.device.raw();
+        let device = self.device.raw();
 
-        // Destruction of objects must happen in the opposite order they are created.
         unsafe {
-            // Command buffers are created by a command pool.
-            raw.free_command_buffers(self.command_pool, &[self.command_buffer]);
-            raw.destroy_command_pool(self.command_pool, None);
-        }
+            for pipeline in self.pipelines.values() {
+                device.destroy_pipeline(pipeline.quad, None);
+                device.destroy_pipeline(pipeline.texture, None);
+                // TODO: VUID-vkDestroyRenderPass-renderPass-00873
+                device.destroy_render_pass(pipeline.render_pass, None);
+            }
 
-        // Finally, we let the implicit drop of `Arc<DeviceHandle>` free the device if no other handles exist.
+            // Command buffers must be freed before the command pool.
+            device.free_command_buffers(
+                self.command_pool,
+                &[self.staging_command_buffer, self.render_command_buffer],
+            );
+            device.destroy_command_pool(self.command_pool, None);
+
+            // VUID-vkDestroyFence-fence-01120: All queue submission commands for fence have completed since the fence
+            // must be signalled before exiting the rendering functions.
+            device.destroy_fence(self.render_submit_fence, None);
+        }
+    }
+}
+
+// Impl details
+
+#[derive(Debug)]
+struct RenderTarget {
+    framebuffer: vk::Framebuffer,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug)]
+struct GraphicsPipeline {
+    format: vk::Format,
+    render_pass: vk::RenderPass,
+    texture: vk::Pipeline,
+    quad: vk::Pipeline,
+}
+
+impl VulkanRenderer {
+    unsafe fn bind_framebuffer(
+        &mut self,
+        render_pass: vk::RenderPass,
+        attachment: vk::ImageView,
+        w: u32,
+        h: u32,
+    ) -> Result<(), VkError> {
+        let attachment = &[attachment];
+
+        let create_info = vk::FramebufferCreateInfo::builder()
+            .render_pass(render_pass)
+            .attachments(attachment)
+            .width(w)
+            .height(h)
+            .layers(1);
+
+        let framebuffer = unsafe { self.device.raw().create_framebuffer(&create_info, None) }.map_err(VkError::from)?;
+
+        self.target = Some(RenderTarget {
+            framebuffer,
+            width: w,
+            height: h,
+        });
+
+        Ok(())
     }
 }
