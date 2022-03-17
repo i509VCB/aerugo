@@ -88,9 +88,9 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 // TODO: Need to set up lavapipe on CI for testing some of the basic things.
 #[cfg(test)]
 mod test {
-    use std::error::Error;
+    use std::{error::Error, sync::Mutex};
 
-    use smithay::backend::renderer::ImportMemWl;
+    use slog::Drain;
 
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
@@ -98,11 +98,13 @@ mod test {
 
     #[test]
     fn instance_with_layer() -> Result<(), Box<dyn Error>> {
+        let logger = slog::Logger::root(Mutex::new(slog_term::term_full().fuse()).fuse(), slog::o!());
+
         let instance = unsafe {
             Instance::builder()
                 .layer(VALIDATION_LAYER_NAME)
                 .api_version(Version::VERSION_1_1)
-                .build()
+                .build(logger.clone())
         }
         .expect("Failed to create instance");
 
@@ -136,18 +138,14 @@ mod test {
 
         let device = unsafe { device_builder.build() }?;
 
-        let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
+        let _renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
 
-        println!("DMA Render {:#?}", renderer.dmabuf_render_formats().collect::<Vec<_>>());
-        println!(
-            "DMA Texture {:#?}",
-            renderer.dmabuf_texture_formats().collect::<Vec<_>>()
-        );
-        println!("SHM {:#?}", renderer.shm_formats());
-
-        drop(renderer);
-        drop(device);
-        drop(instance);
+        // println!("DMA Render {:#?}", renderer.dmabuf_render_formats().collect::<Vec<_>>());
+        // println!(
+        //     "DMA Texture {:#?}",
+        //     renderer.dmabuf_texture_formats().collect::<Vec<_>>()
+        // );
+        // println!("SHM {:#?}", renderer.shm_formats());
 
         Ok(())
     }

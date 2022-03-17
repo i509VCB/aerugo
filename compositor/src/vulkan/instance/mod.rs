@@ -24,6 +24,7 @@ pub struct InstanceHandle {
     version: Version,
     enabled_extensions: Vec<String>,
     debug: Option<DebugState>,
+    logger: slog::Logger,
 }
 
 impl InstanceHandle {
@@ -64,6 +65,12 @@ impl fmt::Debug for InstanceHandle {
     }
 }
 
+// A Vulkan instance may be used on any thread.
+//
+// The contents of the handle are also constant.
+unsafe impl Send for InstanceHandle {}
+unsafe impl Sync for InstanceHandle {}
+
 impl Drop for InstanceHandle {
     fn drop(&mut self) {
         // SAFETY: The Vulkan specification states the following requirements:
@@ -81,6 +88,9 @@ impl Drop for InstanceHandle {
                     .debug_utils
                     .destroy_debug_utils_messenger(debug.debug_utils_messenger, None)
             }
+
+            // Destroy the handle to the logger
+            unsafe { Box::from_raw(debug.logger_ptr) };
         }
 
         unsafe {
@@ -119,6 +129,8 @@ impl InstanceBuilder {
     /// The extension must be supported by the Vulkan runtime or else building the instance will fail. A great way to
     /// ensure the extension you are requesting is supported is to check if your extension is listed in
     /// [`Instance::enumerate_extensions`].
+    ///
+    /// If available, the builder will try to enable the `VK_EXT_debug_utils`.
     pub fn extension(mut self, extension: impl Into<String>) -> InstanceBuilder {
         self.enable_extensions.push(extension.into());
         self
@@ -151,7 +163,7 @@ impl InstanceBuilder {
     ///
     /// The valid usage requirement for vkCreateInstance, `VUID-vkCreateInstance-ppEnabledExtensionNames-01388`,
     /// states all enabled extensions must also enable the required dependencies.
-    pub unsafe fn build(mut self) -> Result<Instance, InstanceError> {
+    pub unsafe fn build(mut self, logger: slog::Logger) -> Result<Instance, InstanceError> {
         // We require at least Vulkan 1.1
         if self.api_version < Version::VERSION_1_1 {
             return Err(InstanceError::UnsupportedVulkanVersion(self.api_version));
@@ -240,8 +252,11 @@ impl InstanceBuilder {
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }.map_err(VkError::from)?;
 
         let debug = if supports_debug {
-            // FIXME: This probably needs to be gated?
-            // Now setup the debug utils if it's available.
+            let logger = logger.new(slog::o!("vulkan" => "debug_messenger"));
+
+            // Allocate the logger on the heap for Vulkan.
+            let logger_ptr = Box::into_raw(Box::new(logger));
+
             let debug_utils = DebugUtils::new(&LIBRARY, &instance);
             let debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
                 .message_severity(
@@ -255,12 +270,14 @@ impl InstanceBuilder {
                         | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                         | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
                 )
-                .pfn_user_callback(Some(vulkan_debug_utils_callback));
+                .pfn_user_callback(Some(vulkan_debug_utils_callback))
+                .user_data(logger_ptr as *mut _);
 
             let debug_utils_messenger =
                 unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None) }.map_err(VkError::from)?;
 
             Some(DebugState {
+                logger_ptr,
                 debug_utils,
                 debug_utils_messenger,
             })
@@ -268,11 +285,17 @@ impl InstanceBuilder {
             None
         };
 
+        let logger = logger.new(slog::o!("vulkan" => "instance"));
+
+        slog::info!(logger, "Created new instance" ; slog::o!("version" => format!("{}", self.api_version)));
+        slog::debug!(logger, "Enabled instance extensions: {:?}", self.enable_extensions);
+
         let handle = Arc::new(InstanceHandle {
             handle: instance,
             version: self.api_version,
             enabled_extensions: self.enable_extensions,
             debug,
+            logger,
         });
 
         Ok(Instance(handle))
@@ -283,12 +306,25 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut c_void,
+    logger: *mut c_void,
 ) -> vk::Bool32 {
+    // Get the logger from the user data pointer we gave to Vulkan.
+    //
+    // The logger is allocated on the heap using a box, but we do not want to drop the logger, so read from
+    // the pointer.
+    let logger: &slog::Logger = unsafe { (logger as *mut slog::Logger).as_ref() }.unwrap();
+
     let message = unsafe { ffi::CStr::from_ptr((*p_callback_data).p_message) };
-    let severity = format!("{:?}", message_severity).to_lowercase();
+    let message = format!("{:?}", message).to_lowercase();
     let ty = format!("{:?}", message_type).to_lowercase();
-    println!("[Debug][{}][{}] {:?}", severity, ty, message);
+
+    match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => slog::debug!(logger, "{}", message ; "ty" => ty),
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => slog::info!(logger, "{}", message ; "ty" => ty),
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => slog::warn!(logger, "{}", message ; "ty" => ty),
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => slog::error!(logger, "{}", message ; "ty" => ty),
+        _ => (),
+    }
 
     // Must always return false.
     vk::FALSE
@@ -389,6 +425,10 @@ impl Instance {
 }
 
 struct DebugState {
+    /// Pointer to the logger.
+    ///
+    /// Allocated on the heap as a [`Box`].
+    logger_ptr: *mut slog::Logger,
     debug_utils: DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
 }
