@@ -3,10 +3,11 @@ use smithay::{backend::allocator, reexports::wayland_server::protocol::wl_shm};
 
 use crate::{
     format::{formats, fourcc_to_vk, fourcc_to_wl},
-    vulkan::{error::VkError, renderer::ShmFormatInfo},
+    vulkan::{
+        error::VkError,
+        renderer::{Error, ShmFormatInfo, VulkanRenderer},
+    },
 };
-
-use super::{Error, VulkanRenderer};
 
 /// Features a format must support in order to be used as a texture format.
 ///
@@ -182,39 +183,6 @@ pub(crate) unsafe fn get_image_format_properties(
     }
 }
 
-// // Build the list of valid dmabuf and shm formats
-// let mut shm_formats: Vec<()> = vec![];
-// let mut dma_formats: Vec<()> = vec![];
-// let mut render_formats: Vec<()> = vec![];
-
-// let instance = unsafe { device.instance.raw() };
-
-// for code in format_convert::formats() {
-
-//         // for modifier_properties in modifiers {
-//         //     dma_formats.push(allocator::Format {
-//         //         code,
-//         //         modifier: allocator::Modifier::from(modifier_properties.drm_format_modifier),
-//         //     })
-//         // }
-//     }
-// }
-
-// //if modifier.drm_format_modifier_tiling_features.contains(TEXTURE_FEATURES) {
-// // TODO: Ensure the shm requirements are fully met
-// //    println!("{} - TEXTURE", code);
-// //}
-
-// // // Ensure the shm renderer contains the mandatory formats
-// // if !shm_formats.iter().any(|format| format == &wl_shm::Format::Argb8888) {
-// //     todo!("Missing argb8888")
-// // }
-
-// // // Ensure the shm renderer contains the mandatory formats
-// // if !shm_formats.iter().any(|format| format == &wl_shm::Format::Xrgb8888) {
-// //     todo!("Missing xrgb8888")
-// // }
-
 impl VulkanRenderer {
     pub(crate) fn load_formats(&mut self) -> Result<(), Error> {
         let instance = self.device.instance.raw();
@@ -222,7 +190,7 @@ impl VulkanRenderer {
 
         for format in formats() {
             if let Some((vk_format, _)) = fourcc_to_vk(format) {
-                // SAFETY: We have asserted VK_EXT_image_drm_format_modifier is present.
+                // SAFETY: VK_EXT_image_drm_format_modifier is available.
                 let modifiers = unsafe { get_format_modifiers(instance, phy, vk_format) };
 
                 // Check if the modifiers support specific types of usages.
@@ -269,7 +237,6 @@ impl VulkanRenderer {
                 }
 
                 // Memory
-                // TODO: Use `_image_format_properties` for info like max extent
                 if let Some(image_format_properties) =
                     unsafe { get_image_format_properties(instance, phy, vk_format, TEXTURE_USAGE, None) }?
                 {
@@ -302,15 +269,7 @@ impl VulkanRenderer {
         if !self
             .shm_formats
             .iter()
-            .any(|format| format == &wl_shm::Format::Argb8888)
-        {
-            return Err(Error::MissingRequiredFormats);
-        }
-
-        if !self
-            .shm_formats
-            .iter()
-            .any(|format| format == &wl_shm::Format::Xrgb8888)
+            .any(|format| format == &wl_shm::Format::Argb8888 || format == &wl_shm::Format::Xrgb8888)
         {
             return Err(Error::MissingRequiredFormats);
         }

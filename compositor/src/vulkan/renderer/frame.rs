@@ -23,6 +23,11 @@ impl Frame for VulkanFrame {
     type TextureId = VulkanTexture;
 
     fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
+        /*
+          We could use a load/store op during a render pass to clear, but that does not support specifying damage.
+          Instead this function uses vkCmdClearAttachments to support damage boxes.
+        */
+
         // VUID-vkCmdClearAttachments-rectCount-arraylength
         if at.is_empty() {
             return Ok(());
