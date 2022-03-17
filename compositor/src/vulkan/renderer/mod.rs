@@ -241,6 +241,10 @@ impl VulkanRenderer {
         // Check which formats the renderer supports
         renderer.load_formats()?;
 
+        // It's extremely likely we will need to import a buffer in one of the mandatory shm formats, so
+        // initialize the A/Xrgb8888 pipelines now.
+        // TODO
+
         Ok(renderer)
     }
 
@@ -340,6 +344,95 @@ struct GraphicsPipeline {
 }
 
 impl VulkanRenderer {
+    fn create_render_pass(&mut self, format: vk::Format) -> Result<vk::RenderPass, VkError> {
+        let attachment_description = &[vk::AttachmentDescription::builder()
+            .format(format)
+            // One sample per pixel
+            // TODO: We need to query the device limits to check whether we may use this sample count.
+            .samples(vk::SampleCountFlags::TYPE_1)
+            // Since we support damage, we need to preserve the previous contents of the render buffer.
+            .load_op(vk::AttachmentLoadOp::LOAD)
+            // Write generated contents to memory
+            .store_op(vk::AttachmentStoreOp::STORE)
+            // Not using stencils
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            // The initial and final layouts should be usable by any kind of image access.
+            .initial_layout(vk::ImageLayout::GENERAL)
+            .final_layout(vk::ImageLayout::GENERAL)
+            .build()];
+
+        let color_attachment_reference = vk::AttachmentReference::builder()
+            // TODO: Attachment is index into renderpass create info pAttachments
+            //.attachment(0)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .build();
+
+        let color_attachment_subpass = &[vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&[color_attachment_reference])
+            .build()];
+
+        let staging_subpass_dependency = vk::SubpassDependency::builder()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            // TODO: Understand these
+            //
+            .src_stage_mask(
+                // The staging subpass will result in memory domain transfers between the host and device.
+                vk::PipelineStageFlags::HOST
+                // Specify that this 
+                | vk::PipelineStageFlags::TRANSFER // Queue supports graphics operations
+                // All previous commands before this pass must be completed
+                | vk::PipelineStageFlags::TOP_OF_PIPE // No required queue capability flags
+                | vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, // Queue supports graphics operations
+            )
+            // TODO: Understand these
+            .src_access_mask(
+                vk::AccessFlags::HOST_WRITE | vk::AccessFlags::TRANSFER_WRITE | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            )
+            .dst_subpass(0) // Index?
+            // TODO: Understand these
+            .dst_stage_mask(vk::PipelineStageFlags::ALL_GRAPHICS)
+            // TODO: Understand these
+            .dst_access_mask(
+                vk::AccessFlags::UNIFORM_READ
+                    | vk::AccessFlags::VERTEX_ATTRIBUTE_READ
+                    | vk::AccessFlags::INDIRECT_COMMAND_READ
+                    | vk::AccessFlags::SHADER_READ,
+            )
+            .build();
+
+        //
+        let render_subpass_dependency = vk::SubpassDependency::builder()
+            .src_subpass(0) // Depend on the first subpass
+            // TODO: I think this states we depend on color attachment output from the first stage?
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_stage_mask(
+                vk::PipelineStageFlags::TRANSFER
+                // All memory domain transfers between the host and device must complete (such as exporting buffers).
+                | vk::PipelineStageFlags::HOST
+                // All previous commands on the GPU must complete. 
+                | vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            )
+            .dst_access_mask(vk::AccessFlags::TRANSFER_READ | vk::AccessFlags::MEMORY_READ)
+            .build();
+
+        let subpass_dependencies = &[staging_subpass_dependency, render_subpass_dependency];
+
+        let render_pass_create_info = vk::RenderPassCreateInfo::builder()
+            .attachments(attachment_description)
+            .subpasses(color_attachment_subpass)
+            .dependencies(subpass_dependencies);
+
+        unsafe { self.device().raw().create_render_pass(&render_pass_create_info, None) }.map_err(VkError::from)
+    }
+
+    fn get_pipeline(&self, format: vk::Format) -> Option<&GraphicsPipeline> {
+        self.pipelines.get(&format)
+    }
+
     unsafe fn bind_framebuffer(
         &mut self,
         render_pass: vk::RenderPass,

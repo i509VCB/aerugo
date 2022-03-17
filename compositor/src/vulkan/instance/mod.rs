@@ -1,12 +1,15 @@
 mod error;
 
 use std::{
-    ffi::{CStr, CString, NulError},
+    ffi::{self, c_void, CStr, CString, NulError},
     fmt::{self, Formatter},
     sync::Arc,
 };
 
-use ash::vk::{ApplicationInfo, InstanceCreateInfo};
+use ash::{
+    extensions::ext::DebugUtils,
+    vk::{self, ApplicationInfo, InstanceCreateInfo},
+};
 
 use super::{error::VkError, version::Version, LIBRARY, SMITHAY_VERSION};
 
@@ -20,6 +23,7 @@ pub struct InstanceHandle {
     handle: ash::Instance,
     version: Version,
     enabled_extensions: Vec<String>,
+    debug: Option<DebugState>,
 }
 
 impl InstanceHandle {
@@ -70,6 +74,15 @@ impl Drop for InstanceHandle {
         //
         // > Host access to instance must be externally synchronized.
         // Host access is externally synchronized since the InstanceHandle is given to users inside an Arc.
+
+        if let Some(debug) = &mut self.debug {
+            unsafe {
+                debug
+                    .debug_utils
+                    .destroy_debug_utils_messenger(debug.debug_utils_messenger, None)
+            }
+        }
+
         unsafe {
             self.handle.destroy_instance(None);
         }
@@ -138,7 +151,7 @@ impl InstanceBuilder {
     ///
     /// The valid usage requirement for vkCreateInstance, `VUID-vkCreateInstance-ppEnabledExtensionNames-01388`,
     /// states all enabled extensions must also enable the required dependencies.
-    pub unsafe fn build(self) -> Result<Instance, InstanceError> {
+    pub unsafe fn build(mut self) -> Result<Instance, InstanceError> {
         // We require at least Vulkan 1.1
         if self.api_version < Version::VERSION_1_1 {
             return Err(InstanceError::UnsupportedVulkanVersion(self.api_version));
@@ -147,6 +160,14 @@ impl InstanceBuilder {
         // Check if the requested extensions and layers are supported.
         let supported_layers = Instance::enumerate_layers()?.collect::<Vec<_>>();
         let supported_extensions = Instance::enumerate_extensions()?.collect::<Vec<_>>();
+
+        let mut supports_debug = false;
+
+        if supported_extensions.iter().any(|ext| ext == "VK_EXT_debug_utils") {
+            // TODO: Make this nicer to enable
+            self.enable_extensions.push("VK_EXT_debug_utils".to_owned());
+            supports_debug = true;
+        }
 
         let missing_layers = self
             .enable_layers
@@ -217,14 +238,60 @@ impl InstanceBuilder {
         // SAFETY(VUID-vkCreateInstance-ppEnabledExtensionNames-01388): The caller has guaranteed the requirements.
         // SAFETY: The Entry will always outlive the instance since it is a static variable.
         let instance = unsafe { LIBRARY.create_instance(&create_info, None) }.map_err(VkError::from)?;
+
+        let debug = if supports_debug {
+            // FIXME: This probably needs to be gated?
+            // Now setup the debug utils if it's available.
+            let debug_utils = DebugUtils::new(&LIBRARY, &instance);
+            let debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                )
+                .pfn_user_callback(Some(vulkan_debug_utils_callback));
+
+            let debug_utils_messenger =
+                unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None) }.map_err(VkError::from)?;
+
+            Some(DebugState {
+                debug_utils,
+                debug_utils_messenger,
+            })
+        } else {
+            None
+        };
+
         let handle = Arc::new(InstanceHandle {
             handle: instance,
             version: self.api_version,
             enabled_extensions: self.enable_extensions,
+            debug,
         });
 
         Ok(Instance(handle))
     }
+}
+
+unsafe extern "system" fn vulkan_debug_utils_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut c_void,
+) -> vk::Bool32 {
+    let message = unsafe { ffi::CStr::from_ptr((*p_callback_data).p_message) };
+    let severity = format!("{:?}", message_severity).to_lowercase();
+    let ty = format!("{:?}", message_type).to_lowercase();
+    println!("[Debug][{}][{}] {:?}", severity, ty, message);
+
+    // Must always return false.
+    vk::FALSE
 }
 
 /// A Vulkan instance which allows interfacing with the Vulkan APIs.
@@ -318,5 +385,18 @@ impl Instance {
     /// The valid usage requirements may be checked by enabling validation layers.
     pub fn raw(&self) -> &ash::Instance {
         self.0.raw()
+    }
+}
+
+struct DebugState {
+    debug_utils: DebugUtils,
+    debug_utils_messenger: vk::DebugUtilsMessengerEXT,
+}
+
+impl fmt::Debug for DebugState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DebugState")
+            .field("debug_utils_messenger", &self.debug_utils_messenger)
+            .finish_non_exhaustive()
     }
 }
