@@ -1,6 +1,7 @@
 #![warn(missing_debug_implementations)]
 
 pub mod backend;
+pub mod format;
 pub mod state;
 pub mod vulkan;
 

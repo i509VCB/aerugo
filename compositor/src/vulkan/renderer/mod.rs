@@ -1,6 +1,5 @@
 mod dma;
 mod format;
-mod format_convert;
 mod mem;
 
 pub mod bind;

@@ -1,12 +1,9 @@
 use ash::vk;
 use smithay::{backend::allocator, reexports::wayland_server::protocol::wl_shm};
 
-use crate::vulkan::{
-    error::VkError,
-    renderer::{
-        format_convert::{formats, fourcc_to_vk, fourcc_to_wl},
-        ShmFormatInfo,
-    },
+use crate::{
+    format::{formats, fourcc_to_vk, fourcc_to_wl},
+    vulkan::{error::VkError, renderer::ShmFormatInfo},
 };
 
 use super::{Error, VulkanRenderer};
