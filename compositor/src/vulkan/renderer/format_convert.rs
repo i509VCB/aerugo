@@ -1,3 +1,5 @@
+use smithay::{backend::allocator::Fourcc, reexports::wayland_server::protocol::wl_shm};
+
 macro_rules! format_tables {
     (
         $(
@@ -209,20 +211,14 @@ format_tables! {
     },
 }
 
-pub fn fourcc_to_wl(
-    fourcc: smithay::backend::allocator::Fourcc,
-) -> Option<smithay::reexports::wayland_server::protocol::wl_shm::Format> {
+pub fn fourcc_to_wl(fourcc: Fourcc) -> Option<wl_shm::Format> {
     match fourcc {
         // Manual mapping for the two mandatory formats wl_shm defines.
         //
         // Every other format should be the same as the fourcc code.
-        smithay::backend::allocator::Fourcc::Argb8888 => {
-            Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::Argb8888)
-        }
-        smithay::backend::allocator::Fourcc::Xrgb8888 => {
-            Some(smithay::reexports::wayland_server::protocol::wl_shm::Format::Xrgb8888)
-        }
+        Fourcc::Argb8888 => Some(wl_shm::Format::Argb8888),
+        Fourcc::Xrgb8888 => Some(wl_shm::Format::Xrgb8888),
 
-        fourcc => smithay::reexports::wayland_server::protocol::wl_shm::Format::from_raw(fourcc as u32),
+        fourcc => wl_shm::Format::from_raw(fourcc as u32),
     }
 }

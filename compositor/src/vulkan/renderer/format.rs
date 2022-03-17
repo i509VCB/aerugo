@@ -1,11 +1,15 @@
 use ash::vk;
+use smithay::{backend::allocator, reexports::wayland_server::protocol::wl_shm};
 
 use crate::vulkan::{
     error::VkError,
-    renderer::format_convert::{formats, fourcc_to_vk},
+    renderer::{
+        format_convert::{formats, fourcc_to_vk, fourcc_to_wl},
+        ShmFormatInfo,
+    },
 };
 
-use super::VulkanRenderer;
+use super::{Error, VulkanRenderer};
 
 /// Features a format must support in order to be used as a texture format.
 ///
@@ -94,31 +98,51 @@ pub(crate) unsafe fn get_format_modifiers(
     modifiers
 }
 
-pub(crate) unsafe fn get_external_image_properties(
+pub(crate) unsafe fn get_dma_image_format_properties(
     instance: &ash::Instance,
     phy: vk::PhysicalDevice,
     format: vk::Format,
     usage: vk::ImageUsageFlags,
-) -> Result<Option<vk::ExternalMemoryProperties>, VkError> {
-    let mut external_mem_properties = vk::ExternalImageFormatProperties::default();
-    let mut format_properties = vk::ImageFormatProperties2::builder().push_next(&mut external_mem_properties);
-    let format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
+) -> Result<Option<(vk::ExternalMemoryProperties, vk::ImageFormatProperties)>, VkError> {
+    let external_memory_properties = vk::ExternalMemoryProperties::builder()
+        // Must be able to import a dmabuf matching said format.
+        .external_memory_features(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
+        // Format must be usable in a dmabuf image.
+        .compatible_handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT)
+        // .export_from_imported_handle_types(export_from_imported_handle_types) // TODO
+        .build();
+
+    let mut external_image_format_properties =
+        vk::ExternalImageFormatProperties::builder().external_memory_properties(external_memory_properties);
+    let mut image_format_properties_builder =
+        vk::ImageFormatProperties2::builder().push_next(&mut external_image_format_properties);
+
+    let image_format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
         .format(format)
         .tiling(vk::ImageTiling::OPTIMAL)
         .ty(vk::ImageType::TYPE_2D)
         .usage(usage);
 
-    if let Err(result) =
-        unsafe { instance.get_physical_device_image_format_properties2(phy, &format_info, &mut format_properties) }
-    {
-        if result != vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
-            Err(result.into())
-        } else {
+    if let Err(result) = unsafe {
+        instance.get_physical_device_image_format_properties2(
+            phy,
+            &image_format_info,
+            &mut image_format_properties_builder,
+        )
+    } {
+        if result == vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
             // Unsupported format
             Ok(None)
+        } else {
+            Err(result.into())
         }
     } else {
-        Ok(Some(external_mem_properties.external_memory_properties))
+        let image_format_properties = image_format_properties_builder.image_format_properties;
+
+        Ok(Some((
+            external_image_format_properties.external_memory_properties,
+            image_format_properties,
+        )))
     }
 }
 
@@ -195,7 +219,7 @@ pub(crate) unsafe fn get_image_format_properties(
 // // }
 
 impl VulkanRenderer {
-    pub(crate) fn load_formats(&mut self) -> Result<(), VkError> {
+    pub(crate) fn load_formats(&mut self) -> Result<(), Error> {
         let instance = self.device.instance.raw();
         let phy = self.device.phy;
 
@@ -208,15 +232,20 @@ impl VulkanRenderer {
                 for modifier in modifiers {
                     // Rendering
                     if modifier.drm_format_modifier_tiling_features.contains(RENDER_FEATURES) {
+                        // External memory must also support the tiling features that rendering does.
                         if let Some(external_memory_features) =
-                            unsafe { get_external_image_properties(instance, phy, vk_format, RENDER_USAGE) }?
+                            unsafe { get_dma_image_format_properties(instance, phy, vk_format, RENDER_USAGE) }?
                         {
-                            // if external_memory_features
-                            // .external_memory_features
-                            // .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
-                            // {
-                            println!("{} ({}) - RENDER", format, modifier.drm_format_modifier);
-                            //}
+                            if external_memory_features
+                                .0
+                                .external_memory_features
+                                .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
+                            {
+                                self.dma_render_formats.push(allocator::Format {
+                                    code: format,
+                                    modifier: allocator::Modifier::from(modifier.drm_format_modifier),
+                                });
+                            }
                         }
                     }
 
@@ -226,21 +255,25 @@ impl VulkanRenderer {
                         .contains(DMA_TEXTURE_FEATURES)
                     {
                         if let Some(external_memory_features) =
-                            unsafe { get_external_image_properties(instance, phy, vk_format, DMA_TEXTURE_USAGE) }?
+                            unsafe { get_dma_image_format_properties(instance, phy, vk_format, DMA_TEXTURE_USAGE) }?
                         {
-                            // if external_memory_features
-                            // .external_memory_features
-                            // .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
-                            // {
-                            println!("{} ({}) - DMA_TEXTURE", format, modifier.drm_format_modifier);
-                            //}
+                            if external_memory_features
+                                .0
+                                .external_memory_features
+                                .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
+                            {
+                                self.dma_texture_formats.push(allocator::Format {
+                                    code: format,
+                                    modifier: allocator::Modifier::from(modifier.drm_format_modifier),
+                                });
+                            }
                         }
                     }
                 }
 
                 // Memory
                 // TODO: Use `_image_format_properties` for info like max extent
-                if let Some(_image_format_properties) =
+                if let Some(image_format_properties) =
                     unsafe { get_image_format_properties(instance, phy, vk_format, TEXTURE_USAGE, None) }?
                 {
                     let mut format_properties = vk::FormatProperties2::default();
@@ -251,14 +284,39 @@ impl VulkanRenderer {
                         .optimal_tiling_features
                         .contains(TEXTURE_FEATURES)
                     {
-                        println!("{} - TEXTURE", format);
+                        if let Some(shm) = fourcc_to_wl(format) {
+                            self.shm_format_info.push(ShmFormatInfo {
+                                shm,
+                                vk: vk_format,
+                                max_extent: vk::Extent2D {
+                                    width: image_format_properties.max_extent.width,
+                                    height: image_format_properties.max_extent.height,
+                                },
+                            });
+
+                            self.shm_formats.push(shm);
+                        }
                     }
                 }
             }
         }
 
         // Ensure the shm renderer has the mandatory formats.
-        // TODO
+        if !self
+            .shm_formats
+            .iter()
+            .any(|format| format == &wl_shm::Format::Argb8888)
+        {
+            return Err(Error::MissingRequiredFormats);
+        }
+
+        if !self
+            .shm_formats
+            .iter()
+            .any(|format| format == &wl_shm::Format::Xrgb8888)
+        {
+            return Err(Error::MissingRequiredFormats);
+        }
 
         Ok(())
     }

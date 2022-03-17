@@ -90,7 +90,7 @@ static LIBRARY: Lazy<Entry> = Lazy::new(|| unsafe { Entry::load() }.expect("fail
 mod test {
     use std::error::Error;
 
-    use smithay::backend::renderer::Renderer;
+    use smithay::backend::renderer::ImportMemWl;
 
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
@@ -138,8 +138,12 @@ mod test {
 
         let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
 
-        //println!("DMA {:#?}", renderer.dmabuf_formats().collect::<Vec<_>>());
-        //println!("SHM {:#?}", renderer.shm_formats());
+        println!("DMA Render {:#?}", renderer.dmabuf_render_formats().collect::<Vec<_>>());
+        println!(
+            "DMA Texture {:#?}",
+            renderer.dmabuf_texture_formats().collect::<Vec<_>>()
+        );
+        println!("SHM {:#?}", renderer.shm_formats());
 
         drop(renderer);
         drop(device);

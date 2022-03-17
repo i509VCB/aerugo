@@ -1,22 +1,26 @@
+mod dma;
 mod format;
 mod format_convert;
-mod render_pass;
+mod mem;
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+pub mod bind;
+pub mod frame;
+pub mod mapping;
+pub mod texture;
+
+use std::{collections::HashMap, sync::Arc};
 
 use ash::vk::{self, CommandBufferAllocateInfo, CommandPoolCreateInfo};
 use smithay::{
     backend::{
-        allocator::{self, dmabuf::Dmabuf},
-        renderer::{Bind, Frame, ImportDma, ImportShm, Renderer, Texture, TextureFilter, Transform, Unbind},
+        allocator::Format as DrmFormat,
+        renderer::{Renderer, TextureFilter},
     },
-    reexports::wayland_server::protocol::{wl_buffer, wl_shm},
-    utils::{Buffer, Physical, Rectangle, Size},
-    wayland::compositor::SurfaceData,
+    reexports::wayland_server::protocol::wl_shm,
+    utils::{Physical, Size, Transform},
 };
+
+use self::{frame::VulkanFrame, texture::VulkanTexture};
 
 use super::{
     device::{Device, DeviceHandle},
@@ -38,112 +42,9 @@ pub enum Error {
 
     #[error("no target framebuffer to render to, to bind a framebuffer, use `VulkanRenderer::bind`")]
     NoTargetFramebuffer,
-}
 
-#[derive(Debug)]
-pub struct VulkanTexture {}
-
-impl VulkanTexture {
-    pub fn image(&self) -> &ash::vk::Image {
-        todo!()
-    }
-
-    pub fn image_view(&self) -> &ash::vk::ImageView {
-        todo!()
-    }
-}
-
-impl Texture for VulkanTexture {
-    fn width(&self) -> u32 {
-        todo!()
-    }
-
-    fn height(&self) -> u32 {
-        todo!()
-    }
-
-    fn size(&self) -> Size<i32, Buffer> {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub struct VulkanFrame {
-    command_buffer: vk::CommandBuffer,
-    render_pass: vk::RenderPass,
-    device: Arc<DeviceHandle>,
-}
-
-impl Frame for VulkanFrame {
-    type Error = Error;
-
-    type TextureId = VulkanTexture;
-
-    fn clear(&mut self, color: [f32; 4], at: &[Rectangle<i32, Physical>]) -> Result<(), Self::Error> {
-        // VUID-vkCmdClearAttachments-rectCount-arraylength
-        if at.is_empty() {
-            return Ok(());
-        }
-
-        // TODO: VUID-vkCmdClearAttachments-rect-02682 + VUID-vkCmdClearAttachments-rect-02683, extent w, h must be > 0.
-        // TODO: VUID-vkCmdClearAttachments-pRects-00016, regions specified must be within render area of the render pass
-
-        // TODO: What colorspace is float32 in?
-        let clear_value = vk::ClearValue {
-            color: vk::ClearColorValue { float32: color },
-        };
-
-        let attachments = [vk::ClearAttachment::builder()
-            .clear_value(clear_value)
-            .aspect_mask(vk::ImageAspectFlags::COLOR)
-            // VUID-vkCmdClearAttachments-aspectMask-02501
-            .color_attachment(vk::ATTACHMENT_UNUSED)
-            .build()];
-
-        let rects = at
-            .iter()
-            .map(|rect| {
-                let offset = vk::Offset2D::builder().x(rect.loc.x).y(rect.loc.y).build();
-
-                let extent = vk::Extent2D::builder()
-                    .width(rect.size.w as u32)
-                    .height(rect.size.h as u32)
-                    .build();
-
-                let rect = vk::Rect2D::builder().offset(offset).extent(extent).build();
-
-                vk::ClearRect::builder()
-                    // VUID-vkCmdClearAttachments-layerCount-01934
-                    .layer_count(1)
-                    .rect(rect)
-                    .build()
-            })
-            .collect::<Vec<_>>();
-
-        unsafe {
-            self.device
-                .raw()
-                .cmd_clear_attachments(self.command_buffer, &attachments[..], &rects[..])
-        };
-
-        Ok(())
-    }
-
-    fn render_texture_from_to(
-        &mut self,
-        _texture: &Self::TextureId,
-        _src: Rectangle<i32, Buffer>,
-        _dst: Rectangle<f64, Physical>,
-        _damage: &[Rectangle<i32, Physical>],
-        _src_transform: Transform,
-        _alpha: f32,
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    fn transformation(&self) -> Transform {
-        todo!()
-    }
+    #[error("the required wl_shm formats are not supported")]
+    MissingRequiredFormats,
 }
 
 #[derive(Debug)]
@@ -183,6 +84,18 @@ pub struct VulkanRenderer {
     // vert_shader: vk::ShaderModule,
     // tex_frag_shader: vk::ShaderModule,
     // quad_frag_shader: vk::ShaderModule,
+    /// Information about the supported shm formats, such as the max extent of an image.
+    shm_format_info: Vec<ShmFormatInfo>,
+
+    /// Supported shm formats.
+    shm_formats: Vec<wl_shm::Format>,
+
+    /// Supported render formats for a dmabuf.
+    dma_render_formats: Vec<DrmFormat>,
+
+    /// Supported texture formats for a dmabuf.
+    dma_texture_formats: Vec<DrmFormat>,
+
     /// Whether this renderer may import or export some [`Dmabuf`].
     ///
     /// This is only true if the following extensions are enabled on the device:
@@ -314,18 +227,30 @@ impl VulkanRenderer {
             render_command_buffer,
             submit_fence: render_submit_fence,
             target: None,
+            pipelines: HashMap::new(),
+            shm_format_info: Vec::new(),
+            shm_formats: Vec::new(),
+            supports_dma,
+            device,
+            dma_render_formats: Vec::new(),
+            dma_texture_formats: Vec::new(),
             // vert_shader: todo!(),
             // tex_frag_shader: todo!(),
             // quad_frag_shader: todo!(),
-            pipelines: HashMap::new(),
-            supports_dma,
-            device,
         };
 
         // Check which formats the renderer supports
         renderer.load_formats()?;
 
         Ok(renderer)
+    }
+
+    pub fn dmabuf_render_formats(&self) -> impl Iterator<Item = &'_ DrmFormat> {
+        self.dma_render_formats.iter()
+    }
+
+    pub fn dmabuf_texture_formats(&self) -> impl Iterator<Item = &'_ DrmFormat> {
+        self.dma_texture_formats.iter()
     }
 
     pub fn device(&self) -> Arc<DeviceHandle> {
@@ -352,109 +277,15 @@ impl Renderer for VulkanRenderer {
         &mut self,
         _size: Size<i32, Physical>,
         _dst_transform: Transform,
-        rendering: F,
+        _rendering: F,
     ) -> Result<R, Self::Error>
     where
         F: FnOnce(&mut Self, &mut Self::Frame) -> R,
     {
-        // Vulkan requires a target to render to
-        if self.target.is_none() {
-            return Err(Error::NoTargetFramebuffer);
-        }
-
-        let device = self.device.raw();
-
-        // Enter a recording state
-        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::empty());
-
-        unsafe { device.begin_command_buffer(self.render_command_buffer, &begin_info) }.map_err(VkError::from)?;
-
-        // TODO: Then begin the renderpass
-
-        let mut frame = VulkanFrame {
-            command_buffer: self.render_command_buffer,
-            render_pass: todo!(),
-            device: self.device(),
-        };
-
-        // TODO: Set scissor box before invoking callback.
-
-        // Now the frame may issue draw commands.
-        let result = rendering(self, &mut frame);
-
-        // TODO: End renderpass
-        // VUID-vkEndCommandBuffer-commandBuffer-00060
-
-        // Then complete recording a command buffer.
-        // This makes the command buffer executable now.
-        unsafe { device.end_command_buffer(self.render_command_buffer) }.map_err(VkError::from)?;
-
-        let mut submits = Vec::with_capacity(2);
-
-        // TODO: This appears to not need a semaphore between stage/transfer because a renderpass dependency
-        // is used.
-        if self.recording_staging_buffer {
-            unsafe { device.end_command_buffer(self.staging_command_buffer) }.map_err(VkError::from)?;
-            self.recording_staging_buffer = false;
-        }
-
-        // Submit commands to the queue for execution.
-        unsafe { device.queue_submit(*self.device().queue(), &submits[..], self.submit_fence) }
-            .map_err(VkError::from)?;
-
-        // TODO: There is probably a better way to do this than to wait for the fence to complete. This needs
-        // further thought.
-
-        Ok(result)
-    }
-}
-
-impl Bind<Dmabuf> for VulkanRenderer {
-    fn bind(&mut self, _target: Dmabuf) -> Result<(), Self::Error> {
         todo!()
     }
 
-    fn supported_formats(&self) -> Option<HashSet<allocator::Format>> {
-        todo!()
-    }
-}
-
-// TODO: Way to bind to a swapchain or possibly an arbitrary VkFrameBuffer?
-
-impl Unbind for VulkanRenderer {
-    fn unbind(&mut self) -> Result<(), Self::Error> {
-        if let Some(target) = self.target.take() {
-            unsafe {
-                // TODO: VUID-vkDestroyFramebuffer-framebuffer-00892
-                self.device.raw().destroy_framebuffer(target.framebuffer, None);
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl ImportDma for VulkanRenderer {
-    fn import_dmabuf(&mut self, _dmabuf: &Dmabuf) -> Result<Self::TextureId, Self::Error> {
-        todo!()
-    }
-
-    fn dmabuf_formats<'a>(&'a self) -> Box<dyn Iterator<Item = &'a allocator::Format> + 'a> {
-        todo!()
-    }
-}
-
-impl ImportShm for VulkanRenderer {
-    fn import_shm_buffer(
-        &mut self,
-        _buffer: &wl_buffer::WlBuffer,
-        _surface: Option<&SurfaceData>,
-        _damage: &[Rectangle<i32, Buffer>],
-    ) -> Result<Self::TextureId, Self::Error> {
-        todo!()
-    }
-
-    fn shm_formats(&self) -> &[wl_shm::Format] {
+    fn id(&self) -> usize {
         todo!()
     }
 }
@@ -486,6 +317,13 @@ impl Drop for VulkanRenderer {
 }
 
 // Impl details
+
+#[derive(Debug)]
+struct ShmFormatInfo {
+    shm: wl_shm::Format,
+    vk: vk::Format,
+    max_extent: vk::Extent2D,
+}
 
 #[derive(Debug)]
 struct RenderTarget {

@@ -8,14 +8,17 @@ use slog::{info, Logger};
 use smithay::{
     backend::{
         self, allocator,
-        drm::DrmNode,
         egl::{EGLContext, EGLDisplay},
         input::{InputEvent, KeyState, KeyboardKeyEvent},
-        renderer::{gles2::Gles2Renderer, Bind, Frame, Renderer, Transform, Unbind},
+        renderer::{gles2::Gles2Renderer, Bind, Frame, Renderer, Unbind},
         x11::{Window, WindowBuilder, X11Event, X11Handle, X11Surface},
     },
-    reexports::{calloop::LoopHandle, gbm, wayland_server::Display},
-    utils::Rectangle,
+    reexports::{
+        calloop::{generic::Fd, LoopHandle},
+        gbm,
+        wayland_server::Display,
+    },
+    utils::{Rectangle, Transform},
 };
 
 use crate::state::NameMe;
@@ -34,7 +37,7 @@ pub struct X11Backend {
     _egl_display: EGLDisplay,
     // The native display type must outlive everything created by EGL. Even though the display dropping before
     // this is fine, it is not ideal to have this dropped before the display.
-    gbm_device: Arc<Mutex<gbm::Device<DrmNode>>>,
+    gbm_device: Arc<Mutex<gbm::Device<Fd>>>,
 }
 
 impl Backend for X11Backend {
@@ -47,7 +50,7 @@ impl Backend for X11Backend {
         let logger = logger.new(slog::o!("backend" => "x11"));
 
         // Setup the renderer
-        let gbm_device = gbm::Device::new(x_handle.drm_node()?)?;
+        let gbm_device = gbm::Device::new(Fd(x_handle.drm_node()?.1))?;
         // EGL init
         let egl_display = EGLDisplay::new(&gbm_device, logger.clone())?;
         let egl_context = EGLContext::new(&egl_display, logger.clone())?;
