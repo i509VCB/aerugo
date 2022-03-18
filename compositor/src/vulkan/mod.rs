@@ -1,14 +1,5 @@
 #![allow(dead_code)]
 #![forbid(unsafe_op_in_unsafe_fn)]
-/*
-Conventions for contributors:
-
-The following guidelines should be followed for code added to this backend:
-1. Where appropriate, the ID of a Valid Usage statement should be placed as a comment near a Vulkan command or
-   function. A Valid ID usage looks like this for example: `VUID-vkDestroyDevice-device-00378`.
-
-   Sometimes implicit Valid Usage may be mentioned if the requirements are not obvious.
-*/
 // Because this is an experiment for a future pull request.
 //#![warn(missing_docs)] // not as much yellow
 
@@ -44,6 +35,39 @@ The following guidelines should be followed for code added to this backend:
 //! extensions may be queried to select the preferred device.
 //!
 //! [^validation]: [`VALIDATION_LAYER_NAME`]
+
+/*
+  For maintainers and contributors:
+
+  One of the most useful ways to understand Vulkan is the specification found here: https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/.
+  You can also search up the values of constants and types to get more information.
+
+  # A bird's eye view
+
+  The Vulkan backend is a mid-level abstraction to handle common actions, such as creating an instance, obtaining a list
+  of supported extensions, enumerating devices and other miscellaneous things that would be useful for a compositor
+  to query. The Vulkan backend explicitly does not try to turn every stone. To leave an escape hatch, types should
+  provide a way to access the underlying types from ash.
+
+  # Safety considerations
+
+  There is a LOT of unsafe code that results from ash being 99% unsafe code. The general rules of thumb with
+  unsafe code still apply (see the nomicon). Vulkan as a specification also requires you uphold specific API
+  invariants.
+
+  A few of the invariants you must uphold at runtime in Vulkan include:
+  - Only using features and constants provided by the Vulkan when the required extensions are enabled or present.
+    (see https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/chap3.html#fundamentals-validusage-extensions).
+  - Ensure all lifetime requirements objects have are valid.
+  - Ensure the external synchronization requirements are met when an object requires external synchronization.
+  - Ensure all "Valid Usage" requirements in the specification are met.
+
+  In order to keep our sanity with verifying unsafe code, you should probably do the following:
+  - Where appropriate, the ID of a "Valid Usage" statement should be placed as a comment near a Vulkan command or
+    function. A Valid ID usage looks like this for example: `VUID-vkDestroyDevice-device-00378`.
+    These IDs may be easy searched up and are a valid reason to justify that a function is in fact, safe.
+  - Where unclear, implicit "Valid Usage" may be mentioned.
+*/
 
 pub mod device;
 pub mod error;
@@ -94,7 +118,7 @@ mod test {
 
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
-    use super::{instance::Instance, physical_device::PhysicalDevice, VALIDATION_LAYER_NAME};
+    use super::{instance::Instance, VALIDATION_LAYER_NAME};
 
     #[test]
     fn instance_with_layer() -> Result<(), Box<dyn Error>> {
@@ -108,7 +132,8 @@ mod test {
         }
         .expect("Failed to create instance");
 
-        let physical = PhysicalDevice::enumerate(&instance)?
+        let physical = instance
+            .enumerate_devices()
             .filter(|d| {
                 d.supported_extensions()
                     .iter()
@@ -117,26 +142,14 @@ mod test {
             .next()
             .expect("No device supports physical device drm");
 
-        println!("{} supporting version: {}", physical.name(), physical.version());
-
-        if let Some(driver) = physical.driver() {
-            println!("Driver info:");
-            println!("\tname: {}", driver.name);
-            println!("\tinfo: {}", driver.info);
-            println!("\tid: {:?}", driver.id);
-            println!("\tconformance: {:?}", driver.conformance)
-        } else {
-            println!("No driver info");
-        }
-
         let mut device_builder = Device::builder(&physical);
-        let req_extensions = VulkanRenderer::optimal_device_extensions(Version::VERSION_1_1).unwrap();
+        let req_extensions = VulkanRenderer::optimal_device_extensions();
 
         for extension in req_extensions {
             device_builder = device_builder.extension(*extension);
         }
 
-        let device = unsafe { device_builder.build() }?;
+        let device = unsafe { device_builder.build(&instance) }?;
 
         let _renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
 

@@ -10,7 +10,12 @@ use ash::vk::{
     DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo, QueueFlags,
 };
 
-use super::{error::VkError, instance::InstanceHandle, physical_device::PhysicalDevice, Version};
+use super::{
+    error::VkError,
+    instance::{Instance, InstanceHandle},
+    physical_device::PhysicalDevice,
+    Version,
+};
 
 pub use self::error::*;
 
@@ -110,12 +115,12 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     /// states all enabled extensions must also enable the required dependencies.
     ///
     /// <https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#extendingvulkan-extensions-extensiondependencies>
-    pub unsafe fn build(self) -> Result<Device, DeviceError> {
+    pub unsafe fn build(self, instance: &Instance) -> Result<Device, DeviceError> {
         // SAFETY(VUID-VkDeviceCreateInfo-pNext-pNext): None means the pNext field is a null pointer
         //
         // DevicePrivateDataCreateInfoEXT is used for monomorphization purposes. None is passed as the
         // extension, so the generic should be ignored.
-        unsafe { self.build_impl::<DevicePrivateDataCreateInfoEXT>(None) }
+        unsafe { self.build_impl::<DevicePrivateDataCreateInfoEXT>(instance, None) }
     }
 
     /// Returns a new device using the parameters passed into the builder.
@@ -131,14 +136,19 @@ impl<'i, 'p> DeviceBuilder<'i, 'p> {
     /// The extension struct must conform to valid usage requirements in the Vulkan specification.
     pub unsafe fn build_with_extension<T: ExtendsDeviceCreateInfo>(
         self,
+        instance: &Instance,
         extension: &mut T,
     ) -> Result<Device, DeviceError> {
         // SAFETY: Caller guarantees extensions conform to valid usage requirements.
-        unsafe { self.build_impl(Some(extension)) }
+        unsafe { self.build_impl(instance, Some(extension)) }
     }
 
-    unsafe fn build_impl<E: ExtendsDeviceCreateInfo>(self, extension: Option<&mut E>) -> Result<Device, DeviceError> {
-        let instance_handle = self.device.instance().handle();
+    unsafe fn build_impl<E: ExtendsDeviceCreateInfo>(
+        self,
+        instance: &Instance,
+        extension: Option<&mut E>,
+    ) -> Result<Device, DeviceError> {
+        let instance_handle = instance.handle();
         let raw_instance = instance_handle.raw();
 
         // Select an appropriate queue.

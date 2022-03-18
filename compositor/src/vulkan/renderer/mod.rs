@@ -24,7 +24,6 @@ use self::{frame::VulkanFrame, texture::VulkanTexture};
 use super::{
     device::{Device, DeviceHandle},
     error::VkError,
-    version::Version,
     UnsupportedVulkanVersion,
 };
 
@@ -121,24 +120,14 @@ impl VulkanRenderer {
     ///
     /// This list satisfies the requirement that all enabled extensions also enable their dependencies
     /// (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`).
-    pub fn optimal_device_extensions(version: Version) -> Result<&'static [&'static str], UnsupportedVulkanVersion> {
-        if version >= Version::VERSION_1_2 {
-            Ok(&[
-                "VK_KHR_external_memory_fd",
-                "VK_EXT_external_memory_dma_buf",
-                "VK_EXT_image_drm_format_modifier",
-            ])
-        } else if version >= Version::VERSION_1_1 {
-            Ok(&[
-                "VK_KHR_external_memory_fd",
-                "VK_EXT_external_memory_dma_buf",
-                "VK_EXT_image_drm_format_modifier",
-                // Promoted in Vulkan 1.2, enabled here to satisfy VUID-vkCreateDevice-ppEnabledExtensionNames-01387.
-                "VK_KHR_image_format_list",
-            ])
-        } else {
-            Err(UnsupportedVulkanVersion)
-        }
+    pub fn optimal_device_extensions() -> &'static [&'static str] {
+        &[
+            "VK_KHR_external_memory_fd",
+            "VK_EXT_external_memory_dma_buf",
+            "VK_EXT_image_drm_format_modifier",
+            // Or Vulkan 1.2
+            "VK_KHR_image_format_list",
+        ]
     }
 
     /// Returns a list of the device extensions the device must enable to use a [`VulkanRenderer`].
@@ -149,28 +138,20 @@ impl VulkanRenderer {
     ///
     /// This list satisfies the requirement that all enabled extensions also enable their dependencies
     /// (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`).
-    pub fn required_device_extensions(version: Version) -> Result<&'static [&'static str], UnsupportedVulkanVersion> {
-        if version >= Version::VERSION_1_2 {
-            Ok(&["VK_EXT_image_drm_format_modifier"])
-        } else if version >= Version::VERSION_1_1 {
-            Ok(&[
-                "VK_EXT_image_drm_format_modifier",
-                // Promoted in Vulkan 1.2, enabled here to satisfy VUID-vkCreateDevice-ppEnabledExtensionNames-01387.
-                "VK_KHR_image_format_list",
-            ])
-        } else {
-            Err(UnsupportedVulkanVersion)
-        }
+    pub fn required_device_extensions() -> &'static [&'static str] {
+        &[
+            "VK_EXT_image_drm_format_modifier",
+            // Or Vulkan 1.2
+            "VK_KHR_image_format_list",
+        ]
     }
 
     // TODO: There may be some required device capabilities?
 
     pub fn new(device: &Device) -> Result<VulkanRenderer, Error> {
         // Verify the required extensions are supported.
-        let version = device.version();
-
         // VUID-vkCreateDevice-ppEnabledExtensionNames-01387
-        if !Self::required_device_extensions(version)?
+        if !Self::required_device_extensions()
             .iter()
             .all(|extension| device.is_extension_enabled(extension))
         {
@@ -178,8 +159,7 @@ impl VulkanRenderer {
         }
 
         // Test if the renderer supports Dmabuf external memory.
-        let supports_dma = Self::optimal_device_extensions(version)
-            .unwrap()
+        let supports_dma = Self::optimal_device_extensions()
             .iter()
             .all(|extension| device.is_extension_enabled(extension));
 

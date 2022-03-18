@@ -11,7 +11,12 @@ use ash::{
     vk::{self, ApplicationInfo, InstanceCreateInfo},
 };
 
-use super::{error::VkError, version::Version, LIBRARY, SMITHAY_VERSION};
+use super::{
+    error::VkError,
+    physical_device::{PhysicalDevice, PhysicalDeviceInner},
+    version::Version,
+    LIBRARY, SMITHAY_VERSION,
+};
 
 pub use self::error::*;
 
@@ -81,21 +86,26 @@ impl Drop for InstanceHandle {
         //
         // > Host access to instance must be externally synchronized.
         // Host access is externally synchronized since the InstanceHandle is given to users inside an Arc.
-
-        if let Some(debug) = &mut self.debug {
+        let messenger_logger = if let Some(debug) = &mut self.debug {
             unsafe {
                 debug
                     .debug_utils
                     .destroy_debug_utils_messenger(debug.debug_utils_messenger, None)
             }
 
-            // Destroy the handle to the logger
-            unsafe { Box::from_raw(debug.logger_ptr) };
-        }
+            // Since InstanceCreateInfo is extended with DebugUtilsMessengerCreateInfoEXT, destroying the
+            // instance will mean the logger is used.
+            Some(unsafe { Box::from_raw(debug.logger_ptr) })
+        } else {
+            None
+        };
 
         unsafe {
             self.handle.destroy_instance(None);
         }
+
+        // Now that the instance has been destroyed, we can destroy the logger.
+        drop(messenger_logger);
     }
 }
 
@@ -175,9 +185,14 @@ impl InstanceBuilder {
 
         let mut supports_debug = false;
 
+        for extension in RECOMMENDED_INSTANCE_EXTENSIONS {
+            if supported_extensions.iter().any(|ext| ext == *extension) {
+                self.enable_extensions.push(extension.to_string());
+            }
+        }
+
+        // Check if we can enable logging machinery
         if supported_extensions.iter().any(|ext| ext == "VK_EXT_debug_utils") {
-            // TODO: Make this nicer to enable
-            self.enable_extensions.push("VK_EXT_debug_utils".to_owned());
             supports_debug = true;
         }
 
@@ -242,42 +257,52 @@ impl InstanceBuilder {
         let layer_ptrs = layers.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
         let extension_ptrs = extensions.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
 
-        let create_info = InstanceCreateInfo::builder()
+        let messenger_logger = logger.new(slog::o!("vulkan" => "debug_messenger"));
+
+        // Allocate the logger on the heap for Vulkan.
+        let messenger_logger_ptr = Box::into_raw(Box::new(messenger_logger.clone()));
+
+        let mut debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+            .message_severity(
+                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+            )
+            .message_type(
+                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+            )
+            .pfn_user_callback(Some(vulkan_debug_utils_callback))
+            .user_data(messenger_logger_ptr as *mut _);
+
+        let mut create_info = InstanceCreateInfo::builder()
             .application_info(&app_info)
             .enabled_layer_names(&layer_ptrs[..])
             .enabled_extension_names(&extension_ptrs[..]);
 
+        if supports_debug {
+            create_info = create_info.push_next(&mut debug_create_info);
+        }
+
         // SAFETY(VUID-vkCreateInstance-ppEnabledExtensionNames-01388): The caller has guaranteed the requirements.
         // SAFETY: The Entry will always outlive the instance since it is a static variable.
-        let instance = unsafe { LIBRARY.create_instance(&create_info, None) }.map_err(VkError::from)?;
+        let instance = unsafe { LIBRARY.create_instance(&create_info, None) }.map_err(|err| {
+            // Destroy the logger pointer in order to not leak memory
+            let _ = unsafe { Box::from_raw(messenger_logger_ptr) };
+
+            VkError::from(err)
+        })?;
 
         let debug = if supports_debug {
-            let logger = logger.new(slog::o!("vulkan" => "debug_messenger"));
-
-            // Allocate the logger on the heap for Vulkan.
-            let logger_ptr = Box::into_raw(Box::new(logger));
-
             let debug_utils = DebugUtils::new(&LIBRARY, &instance);
-            let debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                .message_severity(
-                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                )
-                .message_type(
-                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-                )
-                .pfn_user_callback(Some(vulkan_debug_utils_callback))
-                .user_data(logger_ptr as *mut _);
 
             let debug_utils_messenger =
                 unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None) }.map_err(VkError::from)?;
 
             Some(DebugState {
-                logger_ptr,
+                logger_ptr: messenger_logger_ptr,
                 debug_utils,
                 debug_utils_messenger,
             })
@@ -288,17 +313,74 @@ impl InstanceBuilder {
         let logger = logger.new(slog::o!("vulkan" => "instance"));
 
         slog::info!(logger, "Created new instance" ; slog::o!("version" => format!("{}", self.api_version)));
-        slog::debug!(logger, "Enabled instance extensions: {:?}", self.enable_extensions);
+        slog::info!(logger, "Enabled instance layers: {:?}", self.enable_layers);
+        slog::info!(logger, "Enabled instance extensions: {:?}", self.enable_extensions);
 
         let handle = Arc::new(InstanceHandle {
             handle: instance,
             version: self.api_version,
             enabled_extensions: self.enable_extensions,
             debug,
-            logger,
+            logger: logger.clone(),
         });
 
-        Ok(Instance(handle))
+        // Physical device enumeration:
+
+        let enumerated_devices = unsafe { handle.raw().enumerate_physical_devices() }.map_err(VkError::from)?;
+        let mut physical_devices = Vec::with_capacity(enumerated_devices.len());
+
+        for (index, phy) in enumerated_devices.iter().enumerate() {
+            match PhysicalDeviceInner::new(handle.raw(), *phy) {
+                Ok(phy) => {
+                    slog::info!(
+                        logger,
+                        "Found physical device #{} ({} api: {})",
+                        index,
+                        &phy.device_name,
+                        &phy.api_version
+                    );
+
+                    let logger = logger.new(slog::o!("device" => phy.device_name.to_string()));
+
+                    if let Some(driver_info) = &phy.driver_info {
+                        slog::info!(
+                            logger,
+                            "Driver info (name: {}, info: {}, id: {:?})",
+                            driver_info.name,
+                            driver_info.info,
+                            driver_info.id
+                        );
+                    }
+
+                    if let Some(primary_node) = &phy.primary_node {
+                        slog::info!(
+                            logger,
+                            "Physical device primary node {}:{}",
+                            primary_node.major(),
+                            primary_node.minor(),
+                        );
+                    }
+
+                    if let Some(render_node) = &phy.render_node {
+                        slog::info!(
+                            logger,
+                            "Physical device render node {}:{}",
+                            render_node.major(),
+                            render_node.minor(),
+                        );
+                    }
+
+                    physical_devices.push(phy);
+                }
+
+                Err(err) => {
+                    slog::error!(logger, "Failed to query information about physical device #{}", index ; "err" => format!("{}", err));
+                    continue;
+                }
+            }
+        }
+
+        Ok(Instance(handle, physical_devices))
     }
 }
 
@@ -320,7 +402,7 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
 
     match message_severity {
         vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => slog::debug!(logger, "{}", message ; "ty" => ty),
-        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => slog::info!(logger, "{}", message ; "ty" => ty),
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => slog::trace!(logger, "{}", message ; "ty" => ty),
         vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => slog::warn!(logger, "{}", message ; "ty" => ty),
         vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => slog::error!(logger, "{}", message ; "ty" => ty),
         _ => (),
@@ -332,7 +414,7 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
 
 /// A Vulkan instance which allows interfacing with the Vulkan APIs.
 #[derive(Debug)]
-pub struct Instance(pub(crate) Arc<InstanceHandle>);
+pub struct Instance(pub(crate) Arc<InstanceHandle>, Vec<PhysicalDeviceInner>);
 
 impl Instance {
     /// Returns the max Vulkan API version supported any created instances.
@@ -400,6 +482,10 @@ impl Instance {
         self.0.is_extension_enabled(extension)
     }
 
+    pub fn enumerate_devices(&self) -> impl Iterator<Item = PhysicalDevice<'_>> {
+        self.1.iter().map(|inner| PhysicalDevice { inner })
+    }
+
     /// Returns a handle to the underling [`ash::Instance`].
     ///
     /// The Vulkan API enforces a strict lifetimes over objects that are created, meaning child objects
@@ -423,6 +509,11 @@ impl Instance {
         self.0.raw()
     }
 }
+
+/// Instance extensions that we load if they are available.
+///
+/// These extensions aren't mandatory but are nice to have.
+const RECOMMENDED_INSTANCE_EXTENSIONS: &[&str] = &["VK_EXT_debug_utils"];
 
 struct DebugState {
     /// Pointer to the logger.
