@@ -19,6 +19,7 @@ directories = "4.0.1"
 thiserror = "1.0.30"
 ash = { version = "0.35.2", features = ["debug"] }
 once_cell = "1.9"
+cgmath = "0.18.0"
 
 [dependencies.smithay]
 git = "https://github.com/Smithay/smithay/"
@@ -35,6 +36,9 @@ features = [
 # Platform dependencies for the config watcher
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.23.0" }
+
+[build-dependencies]
+shaderc = { version = "0.7.4" }
 
 [features]
 # TODO:

@@ -71,11 +71,6 @@ pub struct VulkanRenderer {
     /// Fence used to signal all submitted command buffers have completed execution.
     submit_fence: vk::Fence,
 
-    /// Currently bound render target.
-    ///
-    /// Rendering will fail if the render target is not set.
-    target: Option<RenderTarget>,
-
     // Shaders
     vert_shader: vk::ShaderModule,
     tex_frag_shader: vk::ShaderModule,
@@ -107,6 +102,11 @@ pub struct VulkanRenderer {
     ///
     /// If this is false, all dmabuf import and export functions will fail.
     supports_dma: bool,
+
+    /// Currently bound render target.
+    ///
+    /// Rendering will fail if the render target is not set.
+    target: Option<RenderTarget>,
 
     /// The device handle.
     ///
@@ -168,49 +168,22 @@ impl VulkanRenderer {
             .iter()
             .all(|extension| device.is_extension_enabled(extension));
 
+        let queue_family_index = device.queue_family_index() as u32;
         let device = device.handle();
-        let raw_device = device.raw();
 
-        // TODO: Shaders and etc
-
-        // Create the command pool for Vulkan
-        let command_pool_info = CommandPoolCreateInfo::builder().queue_family_index(device.queue_family_index() as u32);
-        let command_pool =
-            unsafe { raw_device.create_command_pool(&command_pool_info, None) }.map_err(VkError::from)?;
-
-        let fence_create_info = vk::FenceCreateInfo::builder();
-        let render_submit_fence =
-            unsafe { raw_device.create_fence(&fence_create_info, None) }.map_err(VkError::from)?;
-
-        // Render command buffer
-        let render_buffer_info = CommandBufferAllocateInfo::builder()
-            .command_pool(command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        let render_command_buffer = unsafe { raw_device.allocate_command_buffers(&render_buffer_info) }
-            .map_err(VkError::from)?
-            .into_iter()
-            .next()
-            .unwrap();
-
-        // Staging command buffer
-        let staging_buffer_info = CommandBufferAllocateInfo::builder()
-            .command_pool(command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        let staging_command_buffer = unsafe { raw_device.allocate_command_buffers(&staging_buffer_info) }
-            .map_err(VkError::from)?
-            .into_iter()
-            .next()
-            .unwrap();
-
+        // Create the renderer with everything filled in using null handles.
+        //
+        // The reason for initializing everything with null handles is to allow the drop code of the renderer
+        // to properly destroy every object, meaning no memory is leaked if part of the initialization process
+        // fails.
+        //
+        // Vulkan explicitly allows passing null handles into destruction functions, which do nothing.
         let mut renderer = VulkanRenderer {
-            command_pool,
-            staging_command_buffer,
+            command_pool: vk::CommandPool::null(),
+            staging_command_buffer: vk::CommandBuffer::null(),
             recording_staging_buffer: false,
-            render_command_buffer,
-            submit_fence: render_submit_fence,
-            target: None,
+            render_command_buffer: vk::CommandBuffer::null(),
+            submit_fence: vk::Fence::null(),
             vert_shader: vk::ShaderModule::null(),
             tex_frag_shader: vk::ShaderModule::null(),
             quad_frag_shader: vk::ShaderModule::null(),
@@ -220,8 +193,46 @@ impl VulkanRenderer {
             dma_render_formats: Vec::new(),
             dma_texture_formats: Vec::new(),
             supports_dma,
+            target: None,
             device,
         };
+
+        let device_handle = renderer.device();
+        let device_handle = device_handle.raw();
+
+        // Shaders
+        renderer.vert_shader = unsafe { shader::create_shader_module(device_handle, shader::VERTEX_SHADER) }?;
+        // TODO: Frag and texture shaders
+
+        let command_pool_info = CommandPoolCreateInfo::builder().queue_family_index(queue_family_index);
+        renderer.command_pool =
+            unsafe { device_handle.create_command_pool(&command_pool_info, None) }.map_err(VkError::from)?;
+
+        let fence_create_info = vk::FenceCreateInfo::builder();
+        renderer.submit_fence =
+            unsafe { device_handle.create_fence(&fence_create_info, None) }.map_err(VkError::from)?;
+
+        // Render command buffer
+        let render_buffer_info = CommandBufferAllocateInfo::builder()
+            .command_pool(renderer.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        renderer.render_command_buffer = unsafe { device_handle.allocate_command_buffers(&render_buffer_info) }
+            .map_err(VkError::from)?
+            .into_iter()
+            .next()
+            .unwrap();
+
+        // Staging command buffer
+        let staging_buffer_info = CommandBufferAllocateInfo::builder()
+            .command_pool(renderer.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        renderer.staging_command_buffer = unsafe { device_handle.allocate_command_buffers(&staging_buffer_info) }
+            .map_err(VkError::from)?
+            .into_iter()
+            .next()
+            .unwrap();
 
         // Check which formats the renderer supports
         renderer.load_formats()?;
@@ -418,8 +429,47 @@ impl VulkanRenderer {
         unsafe { self.device().raw().create_render_pass(&render_pass_create_info, None) }.map_err(VkError::from)
     }
 
+    fn create_pipeline(&mut self, format: vk::Format) -> Result<&GraphicsPipeline, VkError> {
+        let _render_pass = self.create_render_pass(format)?;
+
+        todo!()
+    }
+
     fn get_pipeline(&self, format: vk::Format) -> Option<&GraphicsPipeline> {
         self.pipelines.get(&format)
+    }
+
+    unsafe fn create_buffer(&self, size: usize, usage: vk::BufferUsageFlags) -> Result<vk::Buffer, VkError> {
+        let device = self.device.raw();
+
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(size as vk::DeviceSize)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+        let buffer = unsafe { device.create_buffer(&buffer_create_info, None) }?;
+        let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let memory_allocate_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(memory_requirements.size)
+            .memory_type_index(todo!("find memory type"));
+
+        let memory = unsafe { device.allocate_memory(&memory_allocate_info, None) }.map_err(|err| {
+            // Failed to allocate, so destroy the buffer
+            unsafe { device.destroy_buffer(buffer, None) };
+
+            err
+        })?;
+
+        unsafe { device.bind_buffer_memory(buffer, memory, 0) }.map_err(|err| {
+            // Failed to bind memory, destroy memory and buffer
+            unsafe { device.free_memory(memory, None) };
+            unsafe { device.destroy_buffer(buffer, None) };
+
+            err
+        })?;
+
+        todo!()
     }
 
     unsafe fn bind_framebuffer(
