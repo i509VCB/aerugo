@@ -1,9 +1,9 @@
+mod bind;
 mod dma;
 mod format;
 mod mem;
 mod shader;
 
-pub mod bind;
 pub mod frame;
 pub mod mapping;
 pub mod texture;
@@ -75,6 +75,17 @@ pub struct VulkanRenderer {
     vert_shader: vk::ShaderModule,
     tex_frag_shader: vk::ShaderModule,
     quad_frag_shader: vk::ShaderModule,
+
+    /// Texture samplers.
+    ///
+    /// This struct contains all valid min and max texture filters.
+    samplers: Samplers,
+
+    /// Min texture filter
+    min_texture_filter: TextureFilter,
+
+    /// Min texture filter
+    max_texture_filter: TextureFilter,
 
     /// All the graphics pipelines created by the renderer.
     ///
@@ -187,6 +198,14 @@ impl VulkanRenderer {
             vert_shader: vk::ShaderModule::null(),
             tex_frag_shader: vk::ShaderModule::null(),
             quad_frag_shader: vk::ShaderModule::null(),
+            samplers: Samplers {
+                linear_min_linear_max: vk::Sampler::null(),
+                linear_min_nearest_max: vk::Sampler::null(),
+                nearest_min_linear_max: vk::Sampler::null(),
+                nearest_min_nearest_max: vk::Sampler::null(),
+            },
+            min_texture_filter: TextureFilter::Nearest,
+            max_texture_filter: TextureFilter::Linear,
             pipelines: HashMap::new(),
             shm_format_info: Vec::new(),
             shm_formats: Vec::new(),
@@ -264,12 +283,14 @@ impl Renderer for VulkanRenderer {
 
     type Frame = VulkanFrame;
 
-    fn downscale_filter(&mut self, _filter: TextureFilter) -> Result<(), Self::Error> {
-        todo!()
+    fn downscale_filter(&mut self, filter: TextureFilter) -> Result<(), Self::Error> {
+        self.min_texture_filter = filter;
+        Ok(())
     }
 
-    fn upscale_filter(&mut self, _filter: TextureFilter) -> Result<(), Self::Error> {
-        todo!()
+    fn upscale_filter(&mut self, filter: TextureFilter) -> Result<(), Self::Error> {
+        self.max_texture_filter = filter;
+        Ok(())
     }
 
     fn render<F, R>(
@@ -294,11 +315,8 @@ impl Drop for VulkanRenderer {
         let device = self.device.raw();
 
         unsafe {
-            for pipeline in self.pipelines.values() {
-                device.destroy_pipeline(pipeline.quad, None);
-                device.destroy_pipeline(pipeline.texture, None);
-                // TODO: VUID-vkDestroyRenderPass-renderPass-00873
-                device.destroy_render_pass(pipeline.render_pass, None);
+            for (_, pipeline) in self.pipelines.drain() {
+                pipeline.destroy(device);
             }
 
             // Command buffers must be freed before the command pool.
@@ -312,6 +330,11 @@ impl Drop for VulkanRenderer {
             device.destroy_shader_module(self.tex_frag_shader, None);
             device.destroy_shader_module(self.vert_shader, None);
 
+            device.destroy_sampler(self.samplers.linear_min_linear_max, None);
+            device.destroy_sampler(self.samplers.linear_min_nearest_max, None);
+            device.destroy_sampler(self.samplers.nearest_min_linear_max, None);
+            device.destroy_sampler(self.samplers.nearest_min_nearest_max, None);
+
             // VUID-vkDestroyFence-fence-01120: All queue submission commands for fence have completed since the fence
             // must be signalled before exiting the rendering functions.
             device.destroy_fence(self.submit_fence, None);
@@ -320,6 +343,25 @@ impl Drop for VulkanRenderer {
 }
 
 // Impl details
+
+#[derive(Debug)]
+struct Samplers {
+    linear_min_linear_max: vk::Sampler,
+    linear_min_nearest_max: vk::Sampler,
+    nearest_min_linear_max: vk::Sampler,
+    nearest_min_nearest_max: vk::Sampler,
+}
+
+impl Samplers {
+    fn get_sampler(&self, min: TextureFilter, max: TextureFilter) -> &vk::Sampler {
+        match (min, max) {
+            (TextureFilter::Linear, TextureFilter::Linear) => &self.linear_min_linear_max,
+            (TextureFilter::Linear, TextureFilter::Nearest) => &self.linear_min_nearest_max,
+            (TextureFilter::Nearest, TextureFilter::Linear) => &self.nearest_min_linear_max,
+            (TextureFilter::Nearest, TextureFilter::Nearest) => &self.nearest_min_nearest_max,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct ShmFormatInfo {
@@ -341,6 +383,17 @@ struct GraphicsPipeline {
     render_pass: vk::RenderPass,
     texture: vk::Pipeline,
     quad: vk::Pipeline,
+}
+
+impl GraphicsPipeline {
+    fn destroy(self, device: &ash::Device) {
+        unsafe {
+            device.destroy_pipeline(self.quad, None);
+            device.destroy_pipeline(self.texture, None);
+            // TODO: VUID-vkDestroyRenderPass-renderPass-00873
+            device.destroy_render_pass(self.render_pass, None);
+        }
+    }
 }
 
 impl VulkanRenderer {
@@ -430,9 +483,41 @@ impl VulkanRenderer {
     }
 
     fn create_pipeline(&mut self, format: vk::Format) -> Result<&GraphicsPipeline, VkError> {
-        let _render_pass = self.create_render_pass(format)?;
+        let mut graphics_pipeline = GraphicsPipeline {
+            format,
+            render_pass: vk::RenderPass::null(),
+            texture: vk::Pipeline::null(),
+            quad: vk::Pipeline::null(),
+        };
 
-        todo!()
+        graphics_pipeline.render_pass = self.create_render_pass(format)?;
+
+        // Create pipeline layouts.
+        // Create descriptor set?
+        // Create vertex shader stage.
+        // Create quad shader stages.
+
+        // TODO: Finish params
+        let quad_pipeline_create_info = [vk::GraphicsPipelineCreateInfo::builder().build()];
+
+        // TODO: Cache pipelines somewhere for faster loading
+        graphics_pipeline.quad = match unsafe {
+            self.device
+                .raw()
+                .create_graphics_pipelines(vk::PipelineCache::null(), &quad_pipeline_create_info, None)
+        } {
+            Ok(pipeline) => pipeline.first().unwrap().clone(),
+
+            Err((_, err)) => {
+                graphics_pipeline.destroy(self.device.raw());
+
+                return Err(VkError::from(err));
+            }
+        };
+
+        self.pipelines.insert(format, graphics_pipeline);
+
+        Ok(self.pipelines.get(&format).unwrap())
     }
 
     fn get_pipeline(&self, format: vk::Format) -> Option<&GraphicsPipeline> {
