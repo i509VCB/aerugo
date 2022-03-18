@@ -1,6 +1,7 @@
 mod dma;
 mod format;
 mod mem;
+mod shader;
 
 pub mod bind;
 pub mod frame;
@@ -41,6 +42,9 @@ pub enum Error {
     #[error("no target framebuffer to render to, to bind a framebuffer, use `VulkanRenderer::bind`")]
     NoTargetFramebuffer,
 
+    #[error("required extensions for dmabuf import/export are not enabled or available")]
+    DmabufNotSupported,
+
     #[error("the required wl_shm formats are not supported")]
     MissingRequiredFormats,
 }
@@ -72,16 +76,17 @@ pub struct VulkanRenderer {
     /// Rendering will fail if the render target is not set.
     target: Option<RenderTarget>,
 
+    // Shaders
+    vert_shader: vk::ShaderModule,
+    tex_frag_shader: vk::ShaderModule,
+    quad_frag_shader: vk::ShaderModule,
+
     /// All the graphics pipelines created by the renderer.
     ///
     /// Each render pass may only have attachments of the matching format, so we need to construct a
     /// renderpass and by proxy a pipeline for each format.
     pipelines: HashMap<vk::Format, GraphicsPipeline>,
 
-    // Shaders
-    // vert_shader: vk::ShaderModule,
-    // tex_frag_shader: vk::ShaderModule,
-    // quad_frag_shader: vk::ShaderModule,
     /// Information about the supported shm formats, such as the max extent of an image.
     shm_format_info: Vec<ShmFormatInfo>,
 
@@ -206,16 +211,16 @@ impl VulkanRenderer {
             render_command_buffer,
             submit_fence: render_submit_fence,
             target: None,
+            vert_shader: vk::ShaderModule::null(),
+            tex_frag_shader: vk::ShaderModule::null(),
+            quad_frag_shader: vk::ShaderModule::null(),
             pipelines: HashMap::new(),
             shm_format_info: Vec::new(),
             shm_formats: Vec::new(),
-            supports_dma,
-            device,
             dma_render_formats: Vec::new(),
             dma_texture_formats: Vec::new(),
-            // vert_shader: todo!(),
-            // tex_frag_shader: todo!(),
-            // quad_frag_shader: todo!(),
+            supports_dma,
+            device,
         };
 
         // Check which formats the renderer supports
@@ -291,6 +296,10 @@ impl Drop for VulkanRenderer {
                 &[self.staging_command_buffer, self.render_command_buffer],
             );
             device.destroy_command_pool(self.command_pool, None);
+
+            device.destroy_shader_module(self.quad_frag_shader, None);
+            device.destroy_shader_module(self.tex_frag_shader, None);
+            device.destroy_shader_module(self.vert_shader, None);
 
             // VUID-vkDestroyFence-fence-01120: All queue submission commands for fence have completed since the fence
             // must be signalled before exiting the rendering functions.

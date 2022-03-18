@@ -7,7 +7,7 @@ use std::{
 };
 
 use ash::vk::{
-    DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo, QueueFlags,
+    self, DeviceCreateInfo, DevicePrivateDataCreateInfoEXT, DeviceQueueCreateInfo, ExtendsDeviceCreateInfo, QueueFlags,
 };
 
 use super::{
@@ -43,11 +43,11 @@ impl DeviceHandle {
         &self.device
     }
 
-    pub fn phy(&self) -> &ash::vk::PhysicalDevice {
+    pub fn phy(&self) -> &vk::PhysicalDevice {
         &self.phy
     }
 
-    pub fn queue(&self) -> &ash::vk::Queue {
+    pub fn queue(&self) -> &vk::Queue {
         &self.queue
     }
 

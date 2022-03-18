@@ -5,7 +5,7 @@ use smithay::backend::{
     renderer::{Bind, Unbind},
 };
 
-use super::{DrmFormat, VulkanRenderer};
+use super::{texture::VulkanTexture, DrmFormat, VulkanRenderer};
 
 impl Bind<Dmabuf> for VulkanRenderer {
     fn bind(&mut self, _target: Dmabuf) -> Result<(), Self::Error> {
@@ -17,7 +17,17 @@ impl Bind<Dmabuf> for VulkanRenderer {
     }
 }
 
-// TODO: Way to bind to a swapchain or possibly an arbitrary VkFrameBuffer?
+impl Bind<VulkanTexture> for VulkanRenderer {
+    fn bind(&mut self, _target: VulkanTexture) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn supported_formats(&self) -> Option<HashSet<DrmFormat>> {
+        todo!()
+    }
+}
+
+// TODO: Swapchain image.
 
 impl Unbind for VulkanRenderer {
     fn unbind(&mut self) -> Result<(), Self::Error> {
