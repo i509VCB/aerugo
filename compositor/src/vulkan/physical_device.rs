@@ -47,11 +47,24 @@ impl PhysicalDevice<'_> {
         self.inner.driver_info.clone()
     }
 
+    /// Returns the type of the device.
+    pub fn ty(&self) -> vk::PhysicalDeviceType {
+        self.inner.ty
+    }
+
     /// Returns the features the device supports.
     ///
     /// Checking if any additional features are supported may be done using [`ash::vk::PhysicalDeviceFeatures2`].  
     pub fn features(&self) -> ash::vk::PhysicalDeviceFeatures {
         self.inner.features
+    }
+
+    pub fn primary_node(&self) -> Option<DrmNode> {
+        self.inner.primary_node
+    }
+
+    pub fn render_node(&self) -> Option<DrmNode> {
+        self.inner.render_node
     }
 
     /// Returns a raw handle to the underlying [`ash::vk::PhysicalDevice`].

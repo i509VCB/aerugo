@@ -10,6 +10,7 @@ use ash::{
     extensions::ext::DebugUtils,
     vk::{self, ApplicationInfo, InstanceCreateInfo},
 };
+use smithay::backend::drm::{DrmNode, NodeType};
 
 use super::{
     error::VkError,
@@ -482,8 +483,24 @@ impl Instance {
         self.0.is_extension_enabled(extension)
     }
 
+    /// Returns an iterator over the physical devices installed on the system.
     pub fn enumerate_devices(&self) -> impl Iterator<Item = PhysicalDevice<'_>> {
         self.1.iter().map(|inner| PhysicalDevice { inner })
+    }
+
+    /// Returns the physical device that corresponds to the DRM node.
+    ///
+    /// Note this function will not return the device which corresponds to the DRM node if the Vulkan
+    /// implementation does not support the `VK_EXT_physical_device_drm` extension.
+    pub fn device_with_node(&self, node: &DrmNode) -> Option<PhysicalDevice<'_>> {
+        let ty = node.ty();
+
+        self.enumerate_devices().find(|phy| match ty {
+            NodeType::Primary => phy.primary_node().map(|primary| &primary == node).unwrap_or(false),
+            NodeType::Render => phy.render_node().map(|render| &render == node).unwrap_or(false),
+            // Cannot have a physical device which is a control node.
+            NodeType::Control => false,
+        })
     }
 
     /// Returns a handle to the underling [`ash::Instance`].
