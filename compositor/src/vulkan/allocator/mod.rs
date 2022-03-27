@@ -1,6 +1,6 @@
 mod upstream;
 
-use std::{fmt, sync::Arc, convert::identity};
+use std::{convert::identity, fmt, sync::Arc};
 
 use ash::{extensions::khr::ExternalMemoryFd, vk};
 use bitflags::bitflags;
@@ -271,11 +271,7 @@ impl VulkanAllocator {
     }
 
     // TODO: Should this take the image dimensions? Vulkan states there is a maximum extent for a format.
-    pub fn is_format_supported(
-        &self,
-        format: Format,
-        usage: ImageUsageFlags
-    ) -> bool {
+    pub fn is_format_supported(&self, format: Format, usage: ImageUsageFlags) -> bool {
         unsafe { self.get_format_info(format, vk::ImageUsageFlags::from_raw(usage.bits())) }
             .ok()
             .is_some()
@@ -539,13 +535,16 @@ mod tests {
         let device = unsafe { device_builder.build(&instance) }.expect("device");
         let mut allocator = VulkanAllocator::new(&device).expect("allocator");
 
-        assert!(allocator.is_format_supported(
-            super::Format {
-                code: super::Fourcc::Argb8888,
-                modifier: super::Modifier::Linear,
-            },
-            ImageUsageFlags::SAMPLED
-        ), "check failed");
+        assert!(
+            allocator.is_format_supported(
+                super::Format {
+                    code: super::Fourcc::Argb8888,
+                    modifier: super::Modifier::Linear,
+                },
+                ImageUsageFlags::SAMPLED
+            ),
+            "check failed"
+        );
 
         let image = allocator
             .create_buffer(100, 100, super::Fourcc::Argb8888, &[super::Modifier::Linear])
