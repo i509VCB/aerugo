@@ -1,12 +1,12 @@
 mod upstream;
 
-use std::{convert::identity, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 
 use ash::{extensions::khr::ExternalMemoryFd, vk};
 use bitflags::bitflags;
 use smithay::{
     backend::allocator::{
-        dmabuf::{AsDmabuf, Dmabuf},
+        dmabuf::{AsDmabuf, Dmabuf, DmabufFlags, MAX_PLANES},
         Allocator, Buffer, Format, Fourcc, Modifier,
     },
     utils::{Buffer as BufferCoord, Size},
@@ -64,7 +64,7 @@ pub struct VulkanAllocator {
     ///
     /// Note this does not guarantee a specific image usage is valid with said format. Further checks are
     /// needed to ensure an image usage is valid with said format.
-    formats: Vec<Format>,
+    formats: Vec<FormatEntry>,
 
     // TODO: Upstream to ash
     drm_format_modifier: DrmFormatModifierEXT,
@@ -267,6 +267,12 @@ impl VulkanAllocator {
             height,
             // Will initialize later in the function
             memory: vk::DeviceMemory::null(),
+            plane_count: self
+                .formats
+                .iter()
+                .find(|entry| entry.format == format)
+                .unwrap()
+                .plane_count,
             external_memory_fd: self.external_memory_fd.clone(),
             device_handle: self.device_handle.clone(),
         };
@@ -299,7 +305,7 @@ impl VulkanAllocator {
     //       colorspace (such as presentation and sampling). DRM formats and modifiers do not care about the
     //       colorspace, applications and presentation hardware do.
 
-    // TODO: Import (if possible)
+    // TODO: Import
 }
 
 impl Allocator<VulkanImage> for VulkanAllocator {
@@ -354,14 +360,44 @@ impl AsDmabuf for VulkanImage {
             None => return Err(ImageConvertError::NotSupported),
         };
 
+        if self.0.plane_count as usize > MAX_PLANES {
+            return Err(ImageConvertError::TooManyPlanes);
+        }
+
         let create_info = vk::MemoryGetFdInfoKHR::builder()
             .handle_type(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT)
             .memory(self.0.memory);
 
         let fd = unsafe { external_memory_fd.get_memory_fd(&create_info) }.map_err(VkError::from)?;
-        println!("{}", fd);
+        let mut builder = Dmabuf::builder(self.size(), self.format().code, DmabufFlags::empty());
 
-        todo!()
+        let device = self.0.device_handle.raw();
+
+        for idx in 0..self.0.plane_count {
+            // get_image_subresource_layout only gets the layout of one memory plane. This mask specifies
+            // which plane should the layout be obtained for.
+            let aspect_mask = match idx {
+                0 => vk::ImageAspectFlags::MEMORY_PLANE_0_EXT,
+                1 => vk::ImageAspectFlags::MEMORY_PLANE_1_EXT,
+                2 => vk::ImageAspectFlags::MEMORY_PLANE_2_EXT,
+                3 => vk::ImageAspectFlags::MEMORY_PLANE_3_EXT,
+                _ => unreachable!(),
+            };
+
+            let subresource = vk::ImageSubresource::builder().aspect_mask(aspect_mask).build();
+            // VUID-vkGetImageSubresourceLayout-image-02270: Image was allocated by us or imported, therefore
+            // the tiling must be DRM_FORMAT_MODIFIER_EXT.
+            let layout = unsafe { device.get_image_subresource_layout(self.0.image, subresource) };
+            builder.add_plane(
+                fd,
+                idx,
+                layout.offset as u32,
+                layout.row_pitch as u32,
+                self.format().modifier,
+            );
+        }
+
+        Ok(builder.build().unwrap())
     }
 }
 
@@ -373,6 +409,12 @@ pub enum ImageConvertError {
     /// [`optimal device extensions`](VulkanAllocator::optimal_device_extensions).
     #[error("the device does not support dmabuf import or export")]
     NotSupported,
+
+    /// The format and modifier has too many planes.
+    ///
+    /// This error may occur due to a bugged Vulkan implementation.
+    #[error("the format and modifier have too many planes")]
+    TooManyPlanes,
 
     /// A Vulkan API error.
     #[error(transparent)]
@@ -401,9 +443,12 @@ impl VulkanAllocator {
                     // format + modifier combination, but there are too many valid image usage combinations to
                     // precalculate that. Instead this check will be done at buffer creation time or if the
                     // user checks given some specified image usage flags.
-                    self.formats.push(Format {
-                        code: fourcc,
-                        modifier: Modifier::from(format_modifier_properties.drm_format_modifier),
+                    self.formats.push(FormatEntry {
+                        format: Format {
+                            code: fourcc,
+                            modifier: Modifier::from(format_modifier_properties.drm_format_modifier),
+                        },
+                        plane_count: format_modifier_properties.drm_format_modifier_plane_count,
                     });
                 }
             }
@@ -422,7 +467,7 @@ impl VulkanAllocator {
         usage: ash::vk::ImageUsageFlags,
     ) -> Result<Option<vk::ImageFormatProperties>, VulkanAllocatorError> {
         // We need to understand the format.
-        if !self.formats.contains(&format) {
+        if !self.formats.iter().any(|entry| entry.format == format) {
             return Ok(None);
         }
 
@@ -467,6 +512,12 @@ impl VulkanAllocator {
     }
 }
 
+#[derive(Debug)]
+struct FormatEntry {
+    format: Format,
+    plane_count: u32,
+}
+
 struct ImageInner {
     /// The underlying image.
     image: vk::Image,
@@ -474,6 +525,7 @@ struct ImageInner {
     width: u32,
     height: u32,
     memory: vk::DeviceMemory,
+    plane_count: u32,
     external_memory_fd: Option<ExternalMemoryFd>,
     /// The device which created or imported this image.
     ///
@@ -596,6 +648,8 @@ mod tests {
         assert_eq!(image.format().code, super::Fourcc::Argb8888);
         assert_eq!(image.format().modifier, super::Modifier::Linear);
 
-        let _ = image.export();
+        let dmabuf = image.export().expect("dma export");
+        assert_eq!(dmabuf.format(), image.format());
+        assert_eq!(dmabuf.size(), image.size());
     }
 }
