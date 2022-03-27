@@ -651,5 +651,23 @@ mod tests {
         let dmabuf = image.export().expect("dma export");
         assert_eq!(dmabuf.format(), image.format());
         assert_eq!(dmabuf.size(), image.size());
+
+        let image2 = allocator
+            .create_buffer(200, 100, super::Fourcc::Argb8888, &[super::Modifier::Linear])
+            .expect("create buffer");
+        assert_eq!(image2.width(), 200);
+        assert_eq!(image2.height(), 100);
+        assert_eq!(image2.format().code, super::Fourcc::Argb8888);
+        assert_eq!(image2.format().modifier, super::Modifier::Linear);
+
+        let dmabuf2 = image2.export().expect("dma export");
+        assert_eq!(dmabuf2.format(), image2.format());
+        assert_eq!(dmabuf2.size(), image2.size());
+
+        drop(image2);
+        drop(image);
+
+        drop(dmabuf);
+        drop(dmabuf2);
     }
 }
