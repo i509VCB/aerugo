@@ -260,14 +260,31 @@ impl VulkanAllocator {
         let modifier = Modifier::from(image_modifier_properties.drm_format_modifier);
         let format = Format { code: fourcc, modifier };
 
-        Ok(VulkanImage(Arc::new(ImageInner {
+        let mut inner = ImageInner {
             image,
             format,
             width,
             height,
-            memory: None,
+            // Will initialize later in the function
+            memory: vk::DeviceMemory::null(),
+            external_memory_fd: self.external_memory_fd.clone(),
             device_handle: self.device_handle.clone(),
-        })))
+        };
+
+        // Allocate memory for the image.
+        let memory_reqs = unsafe { device.get_image_memory_requirements(inner.image) };
+        let mut alloc_info = vk::MemoryAllocateInfo::builder().allocation_size(memory_reqs.size);
+        let mut export_memory_allocate_info =
+            vk::ExportMemoryAllocateInfo::builder().handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
+
+        // If dmabuf import/export is supported, specify the memory must be exportable as a Dmabuf.
+        if self.external_memory_fd.is_some() {
+            alloc_info = alloc_info.push_next(&mut export_memory_allocate_info);
+        }
+
+        inner.memory = unsafe { device.allocate_memory(&alloc_info, None) }.map_err(VkError::from)?;
+
+        Ok(VulkanImage(Arc::new(inner)))
     }
 
     // TODO: Should this take the image dimensions? Vulkan states there is a maximum extent for a format.
@@ -332,6 +349,18 @@ impl AsDmabuf for VulkanImage {
     type Error = ImageConvertError;
 
     fn export(&self) -> Result<Dmabuf, Self::Error> {
+        let external_memory_fd = match &self.0.external_memory_fd {
+            Some(e) => e,
+            None => return Err(ImageConvertError::NotSupported),
+        };
+
+        let create_info = vk::MemoryGetFdInfoKHR::builder()
+            .handle_type(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT)
+            .memory(self.0.memory);
+
+        let fd = unsafe { external_memory_fd.get_memory_fd(&create_info) }.map_err(VkError::from)?;
+        println!("{}", fd);
+
         todo!()
     }
 }
@@ -344,6 +373,10 @@ pub enum ImageConvertError {
     /// [`optimal device extensions`](VulkanAllocator::optimal_device_extensions).
     #[error("the device does not support dmabuf import or export")]
     NotSupported,
+
+    /// A Vulkan API error.
+    #[error(transparent)]
+    Vk(#[from] VkError),
 }
 
 impl VulkanAllocator {
@@ -434,31 +467,40 @@ impl VulkanAllocator {
     }
 }
 
-#[derive(Debug)]
 struct ImageInner {
     /// The underlying image.
     image: vk::Image,
     format: Format,
     width: u32,
     height: u32,
-    /// Device memory associated with the image.
-    ///
-    /// This field is [`Some`] when the image was imported from a [`Dmabuf`].
-    memory: Option<vk::DeviceMemory>,
+    memory: vk::DeviceMemory,
+    external_memory_fd: Option<ExternalMemoryFd>,
     /// The device which created or imported this image.
     ///
     /// This field is here to ensure the image cannot outlive the device.
     device_handle: Arc<DeviceHandle>,
 }
 
+impl fmt::Debug for ImageInner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ImageInner")
+            .field("image", &self.image)
+            .field("format", &self.format)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("memory", &self.memory)
+            .field("device_handle", &self.device_handle)
+            .finish()
+    }
+}
+
 impl Drop for ImageInner {
     fn drop(&mut self) {
         let device = self.device_handle.raw();
 
-        unsafe { device.destroy_image(self.image, None) };
-
-        if let Some(memory) = self.memory {
-            unsafe { device.free_memory(memory, None) };
+        unsafe {
+            device.destroy_image(self.image, None);
+            device.free_memory(self.memory, None);
         }
     }
 }
@@ -468,7 +510,7 @@ mod tests {
     use std::sync::Mutex;
 
     use slog::Drain;
-    use smithay::backend::allocator::{Allocator, Buffer};
+    use smithay::backend::allocator::{dmabuf::AsDmabuf, Allocator, Buffer};
 
     use crate::vulkan::{allocator::ImageUsageFlags, device::Device, instance::Instance, VALIDATION_LAYER_NAME};
 
@@ -553,5 +595,7 @@ mod tests {
         assert_eq!(image.height(), 100);
         assert_eq!(image.format().code, super::Fourcc::Argb8888);
         assert_eq!(image.format().modifier, super::Modifier::Linear);
+
+        let _ = image.export();
     }
 }
