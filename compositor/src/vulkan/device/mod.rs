@@ -47,6 +47,10 @@ impl DeviceHandle {
         &self.phy
     }
 
+    pub fn instance(&self) -> Arc<InstanceHandle> {
+        self.instance.clone()
+    }
+
     pub fn queue(&self) -> &vk::Queue {
         &self.queue
     }
@@ -271,6 +275,10 @@ impl Device {
     /// The valid usage requirements may be checked by enabling validation layers.
     pub fn raw(&self) -> &ash::Device {
         self.0.raw()
+    }
+
+    pub fn instance(&self) -> Arc<InstanceHandle> {
+        self.0.instance.clone()
     }
 
     pub fn queue_family_index(&self) -> usize {

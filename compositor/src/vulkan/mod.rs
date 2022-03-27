@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![forbid(unsafe_op_in_unsafe_fn)]
+#![deny(unsafe_op_in_unsafe_fn)]
 // Because this is an experiment for a future pull request.
 //#![warn(missing_docs)] // not as much yellow
 
@@ -75,6 +75,7 @@ pub mod instance;
 pub mod physical_device;
 pub mod version;
 
+pub mod allocator;
 pub mod renderer;
 
 use ash::Entry;

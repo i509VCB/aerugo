@@ -446,7 +446,7 @@ impl Instance {
     /// Enumerates over the available instance layers on the system.
     pub fn enumerate_extensions() -> Result<impl Iterator<Item = String>, VkError> {
         let extensions = LIBRARY
-            .enumerate_instance_extension_properties()?
+            .enumerate_instance_extension_properties(None)?
             .into_iter()
             .map(|properties| {
                 // SAFETY: Vulkan guarantees the string is null terminated.
