@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use smithay::backend::{
-    renderer::{Bind, Unbind},
-};
+use smithay::backend::renderer::{Bind, Unbind};
 
 use super::{texture::VulkanTexture, DrmFormat, VulkanRenderer};
 

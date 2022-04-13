@@ -55,6 +55,12 @@ pub enum Error {
 pub struct VulkanRenderer {
     /// Command pool used to allocate the staging and rendering command buffers.
     command_pool: vk::CommandPool,
+    command_buffer: vk::CommandBuffer,
+
+    /// Used to signal when queue submission commands have completed.
+    ///
+    /// This is in a signalled state by default.
+    submit_fence: vk::Fence,
 
     /// Renderer format info.
     formats: Formats,
@@ -122,20 +128,19 @@ impl VulkanRenderer {
         let queue_family_index = device.queue_family_index() as u32;
         let device = device.handle();
 
-        // Create the renderer with everything filled in using null handles.
+        // Create the renderer using null handles.
         //
-        // The reason for initializing everything with null handles is to allow the drop code of the renderer
-        // to properly destroy every object, meaning no memory is leaked if part of the initialization process
-        // fails.
-        //
-        // Vulkan explicitly allows passing null handles into destruction functions, which do nothing.
+        // This heavily simplifies initialization since we do not need manually destroy every handle if one
+        // command fails. Instead we rely on the fact that Vulkan allows null handles to be passed into
+        // "destroy" commands, which does nothing, and rely on the drop implementation for destroying all
+        // Vulkan objects.
         let mut renderer = VulkanRenderer {
             command_pool: vk::CommandPool::null(),
+            command_buffer: vk::CommandBuffer::null(),
+            submit_fence: vk::Fence::null(),
             formats: Formats {
                 shm_format_info: Vec::new(),
                 shm_formats: Vec::new(),
-                dma_render_formats: Vec::new(),
-                dma_texture_formats: Vec::new(),
             },
             target: None,
             device,
@@ -144,26 +149,32 @@ impl VulkanRenderer {
         let device_handle = renderer.device();
         let device_handle = device_handle.raw();
 
-        let command_pool_info = vk::CommandPoolCreateInfo::builder().queue_family_index(queue_family_index);
+        let command_pool_info = vk::CommandPoolCreateInfo::builder()
+            .queue_family_index(queue_family_index)
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
         renderer.command_pool =
             unsafe { device_handle.create_command_pool(&command_pool_info, None) }.map_err(VkError::from)?;
 
-        // Check which formats the renderer supports
-        renderer.load_formats()?;
+        let command_buffer_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(renderer.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        renderer.command_buffer = unsafe { device_handle.allocate_command_buffers(&command_buffer_info) }
+            .map_err(VkError::from)?
+            .first()
+            .copied()
+            .unwrap();
 
-        // It's extremely likely we will need to import a buffer in one of the mandatory shm formats, so
-        // initialize the A/Xrgb8888 pipelines now.
-        // TODO
+        // The fence is created as signalled for two reasons:
+        // 1. The first frame rendered will not wait forever waiting for a previous frame that never happened.
+        // 2. If the renderer is immediately destroyed, we don't wait for the fence to never get signalled.
+        let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
+        renderer.submit_fence = unsafe { device_handle.create_fence(&fence_info, None) }.map_err(VkError::from)?;
+
+        // Initialize the list of supported formats
+        renderer.init_shm_formats()?;
 
         Ok(renderer)
-    }
-
-    pub fn dmabuf_render_formats(&self) -> impl Iterator<Item = &'_ DrmFormat> {
-        self.formats.dma_render_formats.iter()
-    }
-
-    pub fn dmabuf_texture_formats(&self) -> impl Iterator<Item = &'_ DrmFormat> {
-        self.formats.dma_texture_formats.iter()
     }
 
     pub fn device(&self) -> Arc<DeviceHandle> {
@@ -208,7 +219,23 @@ impl Drop for VulkanRenderer {
         let device = self.device.raw();
 
         unsafe {
+            // It appears we do not need to explicitly free the command buffers. Done for sake of clarity.
+            device.free_command_buffers(self.command_pool, &[self.command_buffer]);
             device.destroy_command_pool(self.command_pool, None);
+
+            // VUID-vkDestroyFence-fence-01120: Wait for the fence to be signalled, indicating queue
+            // submission commands have been completed.
+            //
+            // This will always return within a reasonable amount of time for one of two reasons:
+            //
+            // 1. We waited on the fence, indicating execution is complete.
+            // 2. The renderer was immediately dropped, the fence is created as initially signalled.
+            //
+            // The timeout may seem absurd, at a maximum wait of 584 years. The Vulkan specification states we
+            // should not be waiting too long (in the worst case a few seconds) before the fences are
+            // signalled and the drop implementation continues.
+            let _ = device.wait_for_fences(&[self.submit_fence], true, u64::MAX);
+            device.destroy_fence(self.submit_fence, None);
         }
     }
 }
@@ -222,16 +249,6 @@ struct Formats {
 
     /// Supported shm formats.
     shm_formats: Vec<wl_shm::Format>,
-
-    /// Supported render formats for a dmabuf.
-    ///
-    /// This is the list of formats that may be rendered to a dmabuf.
-    dma_render_formats: Vec<DrmFormat>,
-
-    /// Supported texture formats for a dmabuf.
-    ///
-    /// This is the list of formats that may be sampled from a dmabuf.
-    dma_texture_formats: Vec<DrmFormat>,
 }
 
 #[derive(Debug)]

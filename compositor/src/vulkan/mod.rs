@@ -116,6 +116,7 @@ mod test {
     use std::{error::Error, sync::Mutex};
 
     use slog::Drain;
+    use smithay::backend::renderer::ImportMemWl;
 
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
@@ -152,14 +153,14 @@ mod test {
 
         let device = unsafe { device_builder.build(&instance) }?;
 
-        let _renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
+        let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
 
         // println!("DMA Render {:#?}", renderer.dmabuf_render_formats().collect::<Vec<_>>());
         // println!(
         //     "DMA Texture {:#?}",
         //     renderer.dmabuf_texture_formats().collect::<Vec<_>>()
         // );
-        // println!("SHM {:#?}", renderer.shm_formats());
+        println!("shm formats: {:?}", renderer.shm_formats());
 
         Ok(())
     }

@@ -1,5 +1,5 @@
 use ash::vk;
-use smithay::{backend::allocator, reexports::wayland_server::protocol::wl_shm};
+use smithay::reexports::wayland_server::protocol::wl_shm;
 
 use crate::{
     format::{formats, fourcc_to_vk, fourcc_to_wl},
@@ -9,6 +9,12 @@ use crate::{
     },
 };
 
+// TODO(i5): There might be an optimization we can make with iGPUs since an iGPU (and some dGPUs) will
+// share memory, meaning device memory is host visible (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT). In
+// theory it would be possible to then instead us `vkMapMemory` and entirely bypass the staging
+// buffer. Not 100% sure if this would affect the required flags in the future. For the sake of
+// maximum compatibility, a staging buffer will always work.
+
 /// Features a format must support in order to be used as a texture format.
 ///
 /// A format which supports these features may be used to import memory or SHM buffers.
@@ -16,13 +22,12 @@ pub(crate) const TEXTURE_FEATURES: vk::FormatFeatureFlags = {
     // TODO: Replace the conversion to as_raw when `impl const` is stabilized and ash uses it for bitwise
     // operations on flags.
     let bits =
-        // Transfer features must be supported since we currently use a staging buffer to upload texture data.
+        // A texture must support being the source and destination of image transfer commands.
         //
-        // TODO(i5): There might be an optimization we can make with iGPUs since an iGPU (and some dGPUs) will
-        // share memory, meaning device memory is host visible (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT). In
-        // theory it would be possible to then instead us `vkMapMemory` and entirely bypass the staging
-        // buffer. Not 100% sure if this would affect the required flags in the future. For the sake of
-        // maximum compatibility, a staging buffer will always work.
+        // This is required for texture import and export.
+        //
+        // TODO: Distinguish between texture formats that may be imported and exported, as these may be
+        // theoretically different. This could mean Argb8888 is allowed for import but not export?
         vk::FormatFeatureFlags::TRANSFER_SRC.as_raw()
         | vk::FormatFeatureFlags::TRANSFER_DST.as_raw()
         | vk::FormatFeatureFlags::SAMPLED_IMAGE.as_raw();
@@ -35,24 +40,6 @@ pub(crate) const TEXTURE_USAGE: vk::ImageUsageFlags = {
     let bits = vk::ImageUsageFlags::SAMPLED.as_raw() | vk::ImageUsageFlags::TRANSFER_DST.as_raw();
     vk::ImageUsageFlags::from_raw(bits)
 };
-
-/// Features a format must support in order to be used for rendering.
-pub(crate) const RENDER_FEATURES: vk::FormatFeatureFlags = {
-    // TODO: Replace the conversion to as_raw when `impl const` is stabilized and ash uses it for bitwise
-    // operations on flags.
-    let bits =
-        vk::FormatFeatureFlags::COLOR_ATTACHMENT.as_raw() | vk::FormatFeatureFlags::COLOR_ATTACHMENT_BLEND.as_raw();
-    vk::FormatFeatureFlags::from_raw(bits)
-};
-
-pub(crate) const RENDER_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::COLOR_ATTACHMENT;
-
-/// Features a format must support in order to be used as a dmabuf texture format.
-///
-/// A format which supports these features may be used to import dmabufs of the same format.
-pub(crate) const DMA_TEXTURE_FEATURES: vk::FormatFeatureFlags = vk::FormatFeatureFlags::SAMPLED_IMAGE;
-
-pub(crate) const DMA_TEXTURE_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::SAMPLED;
 
 /// # Safety
 ///
@@ -144,128 +131,70 @@ pub(crate) unsafe fn get_dma_image_format_properties(
     }
 }
 
-pub(crate) unsafe fn get_image_format_properties(
-    instance: &ash::Instance,
-    phy: vk::PhysicalDevice,
-    format: vk::Format,
-    usage: vk::ImageUsageFlags,
-    drm_format_info: Option<&mut vk::PhysicalDeviceImageDrmFormatModifierInfoEXT>,
-) -> Result<Option<vk::ImageFormatProperties>, VkError> {
-    let tiling = if drm_format_info.is_some() {
-        // VUID-VkPhysicalDeviceImageFormatInfo2-tiling-02249
-        vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT
-    } else {
-        vk::ImageTiling::OPTIMAL
-    };
-
-    let mut format_properties = vk::ImageFormatProperties2::builder();
-    let mut format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
-        .format(format)
-        .tiling(tiling)
-        .ty(vk::ImageType::TYPE_2D)
-        .usage(usage);
-
-    if let Some(drm_format_info) = drm_format_info {
-        format_info = format_info.push_next(drm_format_info);
-    }
-
-    if let Err(result) =
-        unsafe { instance.get_physical_device_image_format_properties2(phy, &format_info, &mut format_properties) }
-    {
-        if result != vk::Result::ERROR_FORMAT_NOT_SUPPORTED {
-            Err(result.into())
-        } else {
-            // Unsupported format
-            Ok(None)
-        }
-    } else {
-        Ok(Some(format_properties.image_format_properties))
-    }
-}
-
 impl VulkanRenderer {
-    pub(crate) fn load_formats(&mut self) -> Result<(), Error> {
+    /// Tests which wl_shm formats are supported for the renderer.
+    ///
+    /// This function will go through the list of known formats and test if the texture image usage and format
+    /// features are supported.
+    ///
+    /// # Errors
+    ///
+    /// This function will return [`Err`] if the mandatory wl_shm formats are not supported or some other
+    /// error occurs.
+    pub(super) fn init_shm_formats(&mut self) -> Result<(), Error> {
         let instance = self.device.instance.raw();
         let phy = self.device.phy;
 
         for format in formats() {
             if let Some((vk_format, _)) = fourcc_to_vk(format) {
-                // SAFETY: VK_EXT_image_drm_format_modifier is available.
-                let modifiers = unsafe { get_format_modifiers(instance, phy, vk_format) };
+                let shm = match fourcc_to_wl(format) {
+                    Some(format) => format,
+                    None => continue,
+                };
 
-                // Check if the modifiers support specific types of usages.
-                for modifier in modifiers {
-                    // Rendering
-                    if modifier.drm_format_modifier_tiling_features.contains(RENDER_FEATURES) {
-                        // External memory must also support the tiling features that rendering does.
-                        if let Some(external_memory_features) =
-                            unsafe { get_dma_image_format_properties(instance, phy, vk_format, RENDER_USAGE) }?
-                        {
-                            if external_memory_features
-                                .0
-                                .external_memory_features
-                                .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
-                            {
-                                self.formats.dma_render_formats.push(allocator::Format {
-                                    code: format,
-                                    modifier: allocator::Modifier::from(modifier.drm_format_modifier),
-                                });
-                            }
-                        }
-                    }
+                let mut image_format_properties2 = vk::ImageFormatProperties2::builder();
+                let format_info = vk::PhysicalDeviceImageFormatInfo2::builder()
+                    .format(vk_format)
+                    .tiling(vk::ImageTiling::OPTIMAL)
+                    .ty(vk::ImageType::TYPE_2D)
+                    .usage(TEXTURE_USAGE);
 
-                    // Dmabuf
-                    if modifier
-                        .drm_format_modifier_tiling_features
-                        .contains(DMA_TEXTURE_FEATURES)
-                    {
-                        if let Some(external_memory_features) =
-                            unsafe { get_dma_image_format_properties(instance, phy, vk_format, DMA_TEXTURE_USAGE) }?
-                        {
-                            if external_memory_features
-                                .0
-                                .external_memory_features
-                                .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
-                            {
-                                self.formats.dma_texture_formats.push(allocator::Format {
-                                    code: format,
-                                    modifier: allocator::Modifier::from(modifier.drm_format_modifier),
-                                });
-                            }
-                        }
-                    }
-                }
+                let image_format_properties = match unsafe {
+                    instance.get_physical_device_image_format_properties2(
+                        phy,
+                        &format_info,
+                        &mut image_format_properties2,
+                    )
+                } {
+                    Ok(_) => image_format_properties2.image_format_properties,
+                    Err(vk::Result::ERROR_FORMAT_NOT_SUPPORTED) => continue,
+                    Err(result) => return Err(VkError::from(result).into()),
+                };
 
-                // Memory
-                if let Some(image_format_properties) =
-                    unsafe { get_image_format_properties(instance, phy, vk_format, TEXTURE_USAGE, None) }?
+                // Check if the format supports the texture usage feature flags.
+                let mut format_properties2 = vk::FormatProperties2::builder();
+                unsafe { instance.get_physical_device_format_properties2(phy, vk_format, &mut format_properties2) };
+
+                if format_properties2
+                    .format_properties
+                    .optimal_tiling_features
+                    .contains(TEXTURE_FEATURES)
                 {
-                    let mut format_properties = vk::FormatProperties2::default();
-                    unsafe { instance.get_physical_device_format_properties2(phy, vk_format, &mut format_properties) };
+                    self.formats.shm_format_info.push(ShmFormatInfo {
+                        shm,
+                        vk: vk_format,
+                        max_extent: vk::Extent2D {
+                            width: image_format_properties.max_extent.width,
+                            height: image_format_properties.max_extent.height,
+                        },
+                    });
 
-                    if format_properties
-                        .format_properties
-                        .optimal_tiling_features
-                        .contains(TEXTURE_FEATURES)
-                    {
-                        if let Some(shm) = fourcc_to_wl(format) {
-                            self.formats.shm_format_info.push(ShmFormatInfo {
-                                shm,
-                                vk: vk_format,
-                                max_extent: vk::Extent2D {
-                                    width: image_format_properties.max_extent.width,
-                                    height: image_format_properties.max_extent.height,
-                                },
-                            });
-
-                            self.formats.shm_formats.push(shm);
-                        }
-                    }
+                    self.formats.shm_formats.push(shm);
                 }
             }
         }
 
-        // Ensure the shm renderer has the mandatory formats.
+        // Ensure the required wl_shm formats are available
         if !self
             .formats
             .shm_formats
