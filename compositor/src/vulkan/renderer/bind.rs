@@ -1,21 +1,10 @@
 use std::collections::HashSet;
 
 use smithay::backend::{
-    allocator::dmabuf::Dmabuf,
     renderer::{Bind, Unbind},
 };
 
 use super::{texture::VulkanTexture, DrmFormat, VulkanRenderer};
-
-impl Bind<Dmabuf> for VulkanRenderer {
-    fn bind(&mut self, _target: Dmabuf) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    fn supported_formats(&self) -> Option<HashSet<DrmFormat>> {
-        todo!()
-    }
-}
 
 impl Bind<VulkanTexture> for VulkanRenderer {
     fn bind(&mut self, _target: VulkanTexture) -> Result<(), Self::Error> {

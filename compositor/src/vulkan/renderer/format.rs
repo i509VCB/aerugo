@@ -206,7 +206,7 @@ impl VulkanRenderer {
                                 .external_memory_features
                                 .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
                             {
-                                self.dma_render_formats.push(allocator::Format {
+                                self.formats.dma_render_formats.push(allocator::Format {
                                     code: format,
                                     modifier: allocator::Modifier::from(modifier.drm_format_modifier),
                                 });
@@ -227,7 +227,7 @@ impl VulkanRenderer {
                                 .external_memory_features
                                 .contains(vk::ExternalMemoryFeatureFlags::IMPORTABLE)
                             {
-                                self.dma_texture_formats.push(allocator::Format {
+                                self.formats.dma_texture_formats.push(allocator::Format {
                                     code: format,
                                     modifier: allocator::Modifier::from(modifier.drm_format_modifier),
                                 });
@@ -249,7 +249,7 @@ impl VulkanRenderer {
                         .contains(TEXTURE_FEATURES)
                     {
                         if let Some(shm) = fourcc_to_wl(format) {
-                            self.shm_format_info.push(ShmFormatInfo {
+                            self.formats.shm_format_info.push(ShmFormatInfo {
                                 shm,
                                 vk: vk_format,
                                 max_extent: vk::Extent2D {
@@ -258,7 +258,7 @@ impl VulkanRenderer {
                                 },
                             });
 
-                            self.shm_formats.push(shm);
+                            self.formats.shm_formats.push(shm);
                         }
                     }
                 }
@@ -267,6 +267,7 @@ impl VulkanRenderer {
 
         // Ensure the shm renderer has the mandatory formats.
         if !self
+            .formats
             .shm_formats
             .iter()
             .any(|format| format == &wl_shm::Format::Argb8888 || format == &wl_shm::Format::Xrgb8888)
