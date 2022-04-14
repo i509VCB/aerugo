@@ -201,7 +201,7 @@ impl VulkanRenderer {
             .iter()
             .any(|format| format == &wl_shm::Format::Argb8888 || format == &wl_shm::Format::Xrgb8888)
         {
-            return Err(Error::MissingRequiredFormats);
+            return Err(Error::MissingMandatoryFormats);
         }
 
         Ok(())

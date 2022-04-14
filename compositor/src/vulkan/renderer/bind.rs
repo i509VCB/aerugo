@@ -14,7 +14,7 @@ impl Bind<VulkanTexture> for VulkanRenderer {
     }
 }
 
-// TODO: Swapchain image.
+// TODO: Swapchain images.
 
 impl Unbind for VulkanRenderer {
     fn unbind(&mut self) -> Result<(), Self::Error> {

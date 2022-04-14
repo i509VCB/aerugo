@@ -36,21 +36,33 @@ pub enum Error {
     #[error("required extensions are not enabled")]
     MissingRequiredExtensions,
 
-    #[error("no target framebuffer to render to, to bind a framebuffer, use `VulkanRenderer::bind`")]
-    NoTargetFramebuffer,
+    /// No rendering target was set or the previous target is no longer valid.
+    ///
+    /// You must [`Bind`](smithay::backend::renderer::Bind) a target for the Vulkan renderer.
+    #[error("no rendering target set")]
+    NoTarget,
 
     #[error("required extensions for dmabuf import/export are not enabled or available")]
     DmabufNotSupported,
 
-    #[error("the required wl_shm formats are not supported")]
-    MissingRequiredFormats,
+    /// The mandatory wl_shm formats, [`Argb8888`] and [`Xrgb8888`], are not supported.
+    ///
+    /// [`Argb8888`]: wl_shm::Format::Argb8888
+    /// [`Xrgb8888`]: wl_shm::Format::Xrgb8888
+    #[error("the mandatory wl_shm formats are not supported")]
+    MissingMandatoryFormats,
 }
 
 /// TODO:
+/// - Offscreen<VulkanTexture>
 /// - ExportMem
 /// - ImportDma
 /// - Bind<Dmabuf>
+/// - Offscreen<Dmabuf>
 /// - ExportDma
+///
+/// State tracking:
+/// - Ensure we do not exceed limits set by maxMemoryAllocationCount
 #[derive(Debug)]
 pub struct VulkanRenderer {
     /// Command pool used to allocate the staging and rendering command buffers.
@@ -180,13 +192,13 @@ impl VulkanRenderer {
     pub fn device(&self) -> Arc<DeviceHandle> {
         self.device.clone()
     }
+
+    // TODO: Offscreen texture creation with a specific format?
 }
 
 impl Renderer for VulkanRenderer {
     type Error = Error;
-
     type TextureId = VulkanTexture;
-
     type Frame = VulkanFrame;
 
     fn downscale_filter(&mut self, _filter: TextureFilter) -> Result<(), Self::Error> {
@@ -201,12 +213,57 @@ impl Renderer for VulkanRenderer {
         &mut self,
         _size: Size<i32, Physical>,
         _dst_transform: Transform,
-        _rendering: F,
+        rendering: F,
     ) -> Result<R, Self::Error>
     where
         F: FnOnce(&mut Self, &mut Self::Frame) -> R,
     {
-        todo!()
+        let target = self.target.ok_or(Error::NoTarget)?;
+
+        // Begin recording
+        let device = self.device.raw();
+
+        let begin_info = vk::CommandBufferBeginInfo::builder()
+            // We will only submit this command buffer once.
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+        unsafe { device.begin_command_buffer(self.command_buffer, &begin_info) }.map_err(VkError::from)?;
+
+        let mut frame = VulkanFrame {
+            command_buffer: self.command_buffer,
+            // TODO: implement
+            full_clear_render_pass: vk::RenderPass::null(),
+            // TODO: Partial clear render pass
+            partial_clear_clear_render_pass: vk::RenderPass::null(),
+            target,
+            started: false,
+            device: self.device.clone(),
+        };
+
+        let result = rendering(self, &mut frame);
+
+        // Again to not cause double borrows.
+        let device = self.device.raw();
+
+        // Finish any currently running render pass.
+        if frame.started {
+            unsafe { device.cmd_end_render_pass(self.command_buffer) };
+        }
+
+        // Finalize the command buffer
+        unsafe { device.end_command_buffer(self.command_buffer) }.map_err(VkError::from)?;
+
+        // Submit commands to the queue for execution.
+        let submit_info = vk::SubmitInfo::builder()
+            .command_buffers(&[self.command_buffer])
+            .build();
+
+        // VUID-vkQueueSubmit-fence-00063
+        unsafe { device.reset_fences(&[self.submit_fence]) }.map_err(VkError::from)?;
+        unsafe { device.queue_submit(*self.device.queue(), &[submit_info], self.submit_fence) }
+            .map_err(VkError::from)?;
+
+        Ok(result)
     }
 
     fn id(&self) -> usize {
@@ -258,7 +315,7 @@ struct ShmFormatInfo {
     max_extent: vk::Extent2D,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct RenderTarget {
     framebuffer: vk::Framebuffer,
     width: u32,
