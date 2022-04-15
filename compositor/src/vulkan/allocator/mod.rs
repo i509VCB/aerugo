@@ -425,7 +425,7 @@ impl VulkanAllocator {
     fn load_formats(&mut self) {
         let instance = self.device_handle.instance();
         let instance = instance.raw();
-        let physical = *self.device_handle.phy();
+        let physical = self.device_handle.phy();
 
         for fourcc in crate::format::formats() {
             if let Some((format, _)) = crate::format::fourcc_to_vk(fourcc) {
@@ -475,7 +475,7 @@ impl VulkanAllocator {
             .expect("Fourcc must be convertible to Vulkan if understood")
             .0;
 
-        let physical = *self.device_handle.phy();
+        let physical = self.device_handle.phy();
         let instance = self.device_handle.instance();
         let instance = instance.raw();
 

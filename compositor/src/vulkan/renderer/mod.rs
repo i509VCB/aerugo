@@ -1,3 +1,4 @@
+mod alloc;
 mod bind;
 mod format;
 mod mem;
@@ -54,6 +55,9 @@ pub enum Error {
 }
 
 /// TODO:
+/// - Renderpass creation (full clear and partial clear)
+/// - ImportMem
+/// - Bind<VulkanTexture>
 /// - Offscreen<VulkanTexture>
 /// - ExportMem
 /// - ImportDma
@@ -73,6 +77,8 @@ pub struct VulkanRenderer {
     ///
     /// This is in a signalled state by default.
     submit_fence: vk::Fence,
+
+    memory_properties: vk::PhysicalDeviceMemoryProperties,
 
     /// Renderer format info.
     formats: Formats,
@@ -140,6 +146,13 @@ impl VulkanRenderer {
         let queue_family_index = device.queue_family_index() as u32;
         let device = device.handle();
 
+        let memory_properties = unsafe {
+            device
+                .instance()
+                .raw()
+                .get_physical_device_memory_properties(device.phy())
+        };
+
         // Create the renderer using null handles.
         //
         // This heavily simplifies initialization since we do not need manually destroy every handle if one
@@ -150,6 +163,7 @@ impl VulkanRenderer {
             command_pool: vk::CommandPool::null(),
             command_buffer: vk::CommandBuffer::null(),
             submit_fence: vk::Fence::null(),
+            memory_properties,
             formats: Formats {
                 shm_format_info: Vec::new(),
                 shm_formats: Vec::new(),
@@ -260,7 +274,7 @@ impl Renderer for VulkanRenderer {
 
         // VUID-vkQueueSubmit-fence-00063
         unsafe { device.reset_fences(&[self.submit_fence]) }.map_err(VkError::from)?;
-        unsafe { device.queue_submit(*self.device.queue(), &[submit_info], self.submit_fence) }
+        unsafe { device.queue_submit(self.device.queue(), &[submit_info], self.submit_fence) }
             .map_err(VkError::from)?;
 
         Ok(result)

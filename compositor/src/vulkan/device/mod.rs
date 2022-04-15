@@ -43,16 +43,16 @@ impl DeviceHandle {
         &self.device
     }
 
-    pub fn phy(&self) -> &vk::PhysicalDevice {
-        &self.phy
+    pub fn phy(&self) -> vk::PhysicalDevice {
+        self.phy
     }
 
     pub fn instance(&self) -> Arc<InstanceHandle> {
         self.instance.clone()
     }
 
-    pub fn queue(&self) -> &vk::Queue {
-        &self.queue
+    pub fn queue(&self) -> vk::Queue {
+        self.queue
     }
 
     pub fn queue_family_index(&self) -> usize {
