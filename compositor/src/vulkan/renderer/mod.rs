@@ -12,7 +12,7 @@ use ash::vk;
 use smithay::{
     backend::{
         allocator::Format as DrmFormat,
-        renderer::{Renderer, TextureFilter},
+        renderer::{Renderer, TextureFilter, Unbind},
     },
     reexports::wayland_server::protocol::wl_shm,
     utils::{Physical, Size, Transform},
@@ -96,7 +96,7 @@ pub struct VulkanRenderer {
 
     memory_properties: vk::PhysicalDeviceMemoryProperties,
 
-    renderpasses: HashMap<vk::Format, RenderPasses>,
+    renderpasses: HashMap<vk::Format, vk::RenderPass>,
 
     /// Renderer format info.
     formats: Formats,
@@ -227,7 +227,7 @@ impl VulkanRenderer {
         renderer.init_shm_formats()?;
 
         // Initialize the renderpasses used with argb8888 since it is very common.
-        unsafe { renderer.create_renderpasses(vk::Format::B8G8R8A8_SRGB) }?;
+        unsafe { renderer.create_renderpass(vk::Format::B8G8R8A8_SRGB) }?;
 
         Ok(renderer)
     }
@@ -254,7 +254,7 @@ impl Renderer for VulkanRenderer {
 
     fn render<F, R>(
         &mut self,
-        _size: Size<i32, Physical>,
+        size: Size<i32, Physical>,
         _dst_transform: Transform,
         rendering: F,
     ) -> Result<R, Self::Error>
@@ -262,6 +262,13 @@ impl Renderer for VulkanRenderer {
         F: FnOnce(&mut Self, &mut Self::Frame) -> R,
     {
         let target = self.target.ok_or(Error::NoTarget)?;
+        let render_area = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: vk::Extent2D {
+                width: size.w as u32,
+                height: size.h as u32,
+            },
+        };
 
         // Begin recording
         let device = self.device.raw();
@@ -272,12 +279,15 @@ impl Renderer for VulkanRenderer {
 
         unsafe { device.begin_command_buffer(self.command_buffer, &begin_info) }.map_err(VkError::from)?;
 
+        let begin_pass_info = vk::RenderPassBeginInfo::builder()
+            .render_area(render_area)
+            .render_pass(target.render_pass)
+            .framebuffer(target.framebuffer);
+
+        unsafe { device.cmd_begin_render_pass(self.command_buffer, &begin_pass_info, vk::SubpassContents::INLINE) }
+
         let mut frame = VulkanFrame {
             command_buffer: self.command_buffer,
-            // TODO: implement
-            full_clear_render_pass: vk::RenderPass::null(),
-            // TODO: Partial clear render pass
-            partial_clear_clear_render_pass: vk::RenderPass::null(),
             target,
             started: false,
             device: self.device.clone(),
@@ -288,9 +298,13 @@ impl Renderer for VulkanRenderer {
         // Again to not cause double borrows.
         let device = self.device.raw();
 
-        // Finish any currently running render pass.
-        if frame.started {
-            unsafe { device.cmd_end_render_pass(self.command_buffer) };
+        // End the renderpass
+        unsafe { device.cmd_end_render_pass(self.command_buffer) };
+
+        // Finish recording the staging command buffer.
+        if self.recording_staging {
+            self.recording_staging = false;
+            unsafe { device.end_command_buffer(self.staging_command_buffer) }.map_err(VkError::from)?;
         }
 
         // Finalize the command buffer
@@ -337,10 +351,14 @@ impl Drop for VulkanRenderer {
             let _ = device.wait_for_fences(&[self.submit_fence], true, u64::MAX);
             device.destroy_fence(self.submit_fence, None);
 
+            // Unbind the current framebuffer.
+            let _ = self.unbind();
+
+            let device = self.device.raw();
+
             // Destroy the renderpasses
-            for (_, renderpasses) in self.renderpasses.drain() {
-                device.destroy_render_pass(renderpasses.full_clear, None);
-                device.destroy_render_pass(renderpasses.partial_clear, None);
+            for (_, renderpass) in self.renderpasses.drain() {
+                device.destroy_render_pass(renderpass, None);
             }
 
             // Since all command execution must be completed, destroy any staging buffers that were just
@@ -379,22 +397,17 @@ struct ShmFormatInfo {
 #[derive(Debug, Clone, Copy)]
 struct RenderTarget {
     framebuffer: vk::Framebuffer,
+    render_pass: vk::RenderPass,
     width: u32,
     height: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct RenderPasses {
-    full_clear: vk::RenderPass,
-    partial_clear: vk::RenderPass,
-}
-
 impl VulkanRenderer {
-    fn get_or_create_renderpasses(&mut self, format: vk::Format) -> Option<RenderPasses> {
+    fn get_or_create_renderpasses(&mut self, format: vk::Format) -> Option<vk::RenderPass> {
         self.renderpasses.get(&format).copied()
     }
 
-    unsafe fn create_renderpasses(&mut self, format: vk::Format) -> Result<RenderPasses, VkError> {
+    unsafe fn create_renderpass(&mut self, format: vk::Format) -> Result<vk::RenderPass, VkError> {
         /*
         The Vulkan renderer has two render passes per format:
 
@@ -454,64 +467,28 @@ impl VulkanRenderer {
 
         let device = self.device.raw();
 
-        let full_clear = {
-            let attachment_description = [vk::AttachmentDescription::builder()
-                .format(format)
-                .samples(vk::SampleCountFlags::TYPE_1)
-                // We want to clear on load for this render pass.
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .initial_layout(vk::ImageLayout::GENERAL)
-                .final_layout(vk::ImageLayout::GENERAL)
-                .build()];
+        let attachment_description = [vk::AttachmentDescription::builder()
+            .format(format)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            // We want to load on load for this render pass.
+            .load_op(vk::AttachmentLoadOp::LOAD)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::GENERAL)
+            .final_layout(vk::ImageLayout::GENERAL)
+            .build()];
 
-            let render_pass_create_info = vk::RenderPassCreateInfo::builder()
-                .attachments(&attachment_description)
-                .subpasses(&subpass_description)
-                .dependencies(&subpass_dependencies);
+        let render_pass_create_info = vk::RenderPassCreateInfo::builder()
+            .attachments(&attachment_description)
+            .subpasses(&subpass_description)
+            .dependencies(&subpass_dependencies);
 
-            unsafe { device.create_render_pass(&render_pass_create_info, None) }?
-        };
+        let renderpass = unsafe { device.create_render_pass(&render_pass_create_info, None) }?;
 
-        let partial_clear = {
-            let attachment_description = [vk::AttachmentDescription::builder()
-                .format(format)
-                .samples(vk::SampleCountFlags::TYPE_1)
-                // We want to load on load for this render pass.
-                .load_op(vk::AttachmentLoadOp::LOAD)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .initial_layout(vk::ImageLayout::GENERAL)
-                .final_layout(vk::ImageLayout::GENERAL)
-                .build()];
+        self.renderpasses.insert(format, renderpass);
 
-            let render_pass_create_info = vk::RenderPassCreateInfo::builder()
-                .attachments(&attachment_description)
-                .subpasses(&subpass_description)
-                .dependencies(&subpass_dependencies);
-
-            match unsafe { device.create_render_pass(&render_pass_create_info, None) } {
-                Ok(pass) => pass,
-                Err(err) => unsafe {
-                    // Destroy the previous renderpass to prevent leaks
-                    device.destroy_render_pass(full_clear, None);
-
-                    return Err(VkError::from(err));
-                },
-            }
-        };
-
-        let render_passes = RenderPasses {
-            full_clear,
-            partial_clear,
-        };
-
-        self.renderpasses.insert(format, render_passes);
-
-        Ok(render_passes)
+        Ok(renderpass)
     }
 
     fn recording_staging_buffer(&mut self) -> Result<vk::CommandBuffer, VkError> {

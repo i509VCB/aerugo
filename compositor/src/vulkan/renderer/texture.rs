@@ -10,10 +10,14 @@ use crate::vulkan::{device::DeviceHandle, error::VkError};
 
 use super::{alloc::AllocationId, Error, VulkanRenderer};
 
-#[derive(Debug)]
-pub struct VulkanTexture(TextureInner);
+#[derive(Debug, Clone)]
+pub struct VulkanTexture(Arc<TextureInner>);
 
 impl VulkanTexture {
+    pub fn format(&self) -> vk::Format {
+        self.0.format
+    }
+
     /// The device memory associated with the texture.
     ///
     /// The first entry in the array will always contain some device memory. Depending on the type of image,
@@ -44,6 +48,7 @@ impl Texture for VulkanTexture {
 
 #[derive(Debug)]
 pub(super) struct TextureInner {
+    format: vk::Format,
     size: Size<u32, BufferCoord>,
     memory: [vk::DeviceMemory; MAX_PLANES],
     image: vk::Image,
@@ -56,6 +61,9 @@ pub(super) struct TextureInner {
 impl Drop for TextureInner {
     fn drop(&mut self) {
         let device = self.device_handle.raw();
+
+        // TODO: VUID-vkDestroyImageView-imageView-01026 - We cannot immediately destroy the image, instead
+        // defer to when commands have finished execution.
 
         unsafe {
             device.destroy_image_view(self.image_view, None);
@@ -88,7 +96,11 @@ impl VulkanRenderer {
             .initial_layout(vk::ImageLayout::UNDEFINED)
             // TODO: Supporting specific modifiers will require changes
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST)
+            .usage(
+                vk::ImageUsageFlags::SAMPLED
+                    | vk::ImageUsageFlags::TRANSFER_DST
+                    | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            )
             .extent(vk::Extent3D {
                 width: size.w,
                 height: size.h,
@@ -97,6 +109,7 @@ impl VulkanRenderer {
             .image_type(vk::ImageType::TYPE_2D);
 
         let mut inner = TextureInner {
+            format,
             size,
             memory: [vk::DeviceMemory::null(); MAX_PLANES],
             image: vk::Image::null(),
@@ -148,6 +161,6 @@ impl VulkanRenderer {
 
         inner.image_view = unsafe { device.create_image_view(&image_view_create_info, None) }.map_err(VkError::from)?;
 
-        Ok(VulkanTexture(inner))
+        Ok(VulkanTexture(Arc::new(inner)))
     }
 }

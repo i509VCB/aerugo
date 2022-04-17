@@ -117,7 +117,7 @@ mod test {
 
     use slog::Drain;
     use smithay::{
-        backend::renderer::{ImportMem, ImportMemWl, Renderer},
+        backend::renderer::{Bind, ImportMem, ImportMemWl, Renderer},
         utils::Transform,
     };
 
@@ -169,9 +169,14 @@ mod test {
             .import_memory(&[0xFF, 0xFF, 0xFF, 0xFF], (1, 1).into(), false)
             .expect("import");
 
+        renderer.bind(texture.clone()).expect("bind");
+
         renderer
             .render((1, 1).into(), Transform::Normal, |_renderer, _frame| {})
             .expect("render");
+
+        // TODO: Keep ownership of the value during bind.
+        drop(texture);
 
         Ok(())
     }
