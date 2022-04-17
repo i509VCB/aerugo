@@ -13,7 +13,8 @@ use super::{Error, VulkanRenderer};
 
 // TODO: Move this to a module common to the allocator and renderer,
 // TODO: It's probably quite useful to expose Allocation in public api.
-pub(super) struct Allocator {
+#[derive(Debug)]
+pub(super) struct AllocationIdTracker {
     // TODO: staging buffer utilities
     /// The current number of device allocations.
     allocation_count: Arc<AtomicUsize>,
@@ -26,7 +27,14 @@ pub(super) struct Allocator {
     max_allocation_count: usize,
 }
 
-impl Allocator {
+impl AllocationIdTracker {
+    pub fn new(max_allocations: usize) -> AllocationIdTracker {
+        AllocationIdTracker {
+            allocation_count: Arc::new(AtomicUsize::new(0)),
+            max_allocation_count: max_allocations,
+        }
+    }
+
     /// Allocates some device memory.
     ///
     /// This function will return [`Err`] if the maximum number of allocations is reached.

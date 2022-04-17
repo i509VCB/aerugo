@@ -116,7 +116,7 @@ mod test {
     use std::{error::Error, sync::Mutex};
 
     use slog::Drain;
-    use smithay::backend::renderer::ImportMemWl;
+    use smithay::backend::renderer::{ImportMem, ImportMemWl};
 
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
@@ -153,7 +153,7 @@ mod test {
 
         let device = unsafe { device_builder.build(&instance) }?;
 
-        let renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
+        let mut renderer = VulkanRenderer::new(&device).expect("TODO: Error type");
 
         // println!("DMA Render {:#?}", renderer.dmabuf_render_formats().collect::<Vec<_>>());
         // println!(
@@ -161,6 +161,10 @@ mod test {
         //     renderer.dmabuf_texture_formats().collect::<Vec<_>>()
         // );
         println!("shm formats: {:?}", renderer.shm_formats());
+
+        let texture = renderer
+            .import_memory(&[0xFF, 0xFF, 0xFF, 0xFF], (1, 1).into(), false)
+            .expect("import");
 
         Ok(())
     }

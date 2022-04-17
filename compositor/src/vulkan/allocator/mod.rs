@@ -289,6 +289,8 @@ impl VulkanAllocator {
         }
 
         inner.memory = unsafe { device.allocate_memory(&alloc_info, None) }.map_err(VkError::from)?;
+        // Bind the memory to the image to complete creation
+        unsafe { device.bind_image_memory(inner.image, inner.memory, 0) }.map_err(VkError::from)?;
 
         Ok(VulkanImage(Arc::new(inner)))
     }

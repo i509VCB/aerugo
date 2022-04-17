@@ -18,7 +18,11 @@ use smithay::{
     utils::{Physical, Size, Transform},
 };
 
-use self::{frame::VulkanFrame, texture::VulkanTexture};
+use self::{
+    alloc::{AllocationId, AllocationIdTracker},
+    frame::VulkanFrame,
+    texture::VulkanTexture,
+};
 
 use super::{
     device::{Device, DeviceHandle},
@@ -76,6 +80,10 @@ pub struct VulkanRenderer {
     /// Command pool used to allocate the staging and rendering command buffers.
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
+
+    allocator: AllocationIdTracker,
+
+    staging_buffers: Vec<StagingBuffer>,
 
     /// Used to signal when queue submission commands have completed.
     ///
@@ -157,6 +165,8 @@ impl VulkanRenderer {
                 .get_physical_device_memory_properties(device.phy())
         };
 
+        let device_properties = unsafe { device.instance().raw().get_physical_device_properties(device.phy()) };
+
         // Create the renderer using null handles.
         //
         // This heavily simplifies initialization since we do not need manually destroy every handle if one
@@ -166,6 +176,8 @@ impl VulkanRenderer {
         let mut renderer = VulkanRenderer {
             command_pool: vk::CommandPool::null(),
             command_buffer: vk::CommandBuffer::null(),
+            allocator: AllocationIdTracker::new(device_properties.limits.max_memory_allocation_count as usize),
+            staging_buffers: Vec::new(),
             submit_fence: vk::Fence::null(),
             memory_properties,
             formats: Formats {
@@ -316,6 +328,14 @@ impl Drop for VulkanRenderer {
 }
 
 // Impl details
+
+#[derive(Debug)]
+struct StagingBuffer {
+    buffer: vk::Buffer,
+    buffer_size: vk::DeviceSize,
+    memory: vk::DeviceMemory,
+    memory_allocation_id: AllocationId,
+}
 
 #[derive(Debug)]
 struct Formats {
