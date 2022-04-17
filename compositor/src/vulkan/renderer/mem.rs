@@ -111,7 +111,7 @@ impl ImportMem for VulkanRenderer {
                 device.destroy_buffer(buffer, None);
                 device.free_memory(device_memory, None);
 
-                return Err(VkError::from(err).into());
+                return Err(err.into());
             },
         };
 

@@ -6,7 +6,7 @@ mod mem;
 pub mod frame;
 pub mod texture;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use ash::vk;
 use smithay::{
@@ -80,6 +80,7 @@ pub struct VulkanRenderer {
     /// Command pool used to allocate the staging and rendering command buffers.
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
+    // TODO: Refactor to support asynchronous upload.
     staging_command_buffer: vk::CommandBuffer,
     /// Whether the staging command buffer is recording commands.
     recording_staging: bool,
@@ -94,6 +95,8 @@ pub struct VulkanRenderer {
     submit_fence: vk::Fence,
 
     memory_properties: vk::PhysicalDeviceMemoryProperties,
+
+    renderpasses: HashMap<vk::Format, RenderPasses>,
 
     /// Renderer format info.
     formats: Formats,
@@ -185,6 +188,7 @@ impl VulkanRenderer {
             staging_buffers: Vec::new(),
             submit_fence: vk::Fence::null(),
             memory_properties,
+            renderpasses: HashMap::new(),
             formats: Formats {
                 shm_format_info: Vec::new(),
                 shm_formats: Vec::new(),
@@ -221,6 +225,9 @@ impl VulkanRenderer {
 
         // Initialize the list of supported formats
         renderer.init_shm_formats()?;
+
+        // Initialize the renderpasses used with argb8888 since it is very common.
+        unsafe { renderer.create_renderpasses(vk::Format::B8G8R8A8_SRGB) }?;
 
         Ok(renderer)
     }
@@ -330,6 +337,12 @@ impl Drop for VulkanRenderer {
             let _ = device.wait_for_fences(&[self.submit_fence], true, u64::MAX);
             device.destroy_fence(self.submit_fence, None);
 
+            // Destroy the renderpasses
+            for (_, renderpasses) in self.renderpasses.drain() {
+                device.destroy_render_pass(renderpasses.full_clear, None);
+                device.destroy_render_pass(renderpasses.partial_clear, None);
+            }
+
             // Since all command execution must be completed, destroy any staging buffers that were just
             // executed.
             self.free_staging_buffers();
@@ -370,7 +383,137 @@ struct RenderTarget {
     height: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RenderPasses {
+    full_clear: vk::RenderPass,
+    partial_clear: vk::RenderPass,
+}
+
 impl VulkanRenderer {
+    fn get_or_create_renderpasses(&mut self, format: vk::Format) -> Option<RenderPasses> {
+        self.renderpasses.get(&format).copied()
+    }
+
+    unsafe fn create_renderpasses(&mut self, format: vk::Format) -> Result<RenderPasses, VkError> {
+        /*
+        The Vulkan renderer has two render passes per format:
+
+        The first renderpass performs a full clear of the framebuffer.
+        The second renderpass does not perform a full clear.
+
+        Each renderpass has two subpass dependencies.
+
+        The first subpass performs all the memory imports that might be sticking around in staging buffers.
+
+        The second subpass performs the color attachment.
+        */
+
+        let subpass_dependencies = [
+            vk::SubpassDependency::builder()
+                // First subpass
+                .src_subpass(vk::SUBPASS_EXTERNAL)
+                .src_stage_mask(
+                    vk::PipelineStageFlags::HOST
+                        | vk::PipelineStageFlags::TRANSFER
+                        | vk::PipelineStageFlags::TOP_OF_PIPE
+                        | vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                )
+                .src_access_mask(
+                    vk::AccessFlags::HOST_WRITE
+                        | vk::AccessFlags::TRANSFER_WRITE
+                        | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                )
+                // why 0?
+                .dst_subpass(0)
+                .dst_stage_mask(vk::PipelineStageFlags::ALL_GRAPHICS) // TODO: .dst_access_mask()
+                .build(),
+            vk::SubpassDependency::builder()
+                .src_subpass(0)
+                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                // Last subpass
+                .dst_subpass(vk::SUBPASS_EXTERNAL)
+                .dst_stage_mask(
+                    vk::PipelineStageFlags::TRANSFER
+                        | vk::PipelineStageFlags::HOST
+                        | vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                )
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ | vk::AccessFlags::MEMORY_READ)
+                .build(),
+        ];
+
+        let attachment_references = [vk::AttachmentReference::builder()
+            .attachment(0)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .build()];
+
+        let subpass_description = [vk::SubpassDescription::builder()
+            .color_attachments(&attachment_references)
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .build()];
+
+        let device = self.device.raw();
+
+        let full_clear = {
+            let attachment_description = [vk::AttachmentDescription::builder()
+                .format(format)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                // We want to clear on load for this render pass.
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::GENERAL)
+                .final_layout(vk::ImageLayout::GENERAL)
+                .build()];
+
+            let render_pass_create_info = vk::RenderPassCreateInfo::builder()
+                .attachments(&attachment_description)
+                .subpasses(&subpass_description)
+                .dependencies(&subpass_dependencies);
+
+            unsafe { device.create_render_pass(&render_pass_create_info, None) }?
+        };
+
+        let partial_clear = {
+            let attachment_description = [vk::AttachmentDescription::builder()
+                .format(format)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                // We want to load on load for this render pass.
+                .load_op(vk::AttachmentLoadOp::LOAD)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::GENERAL)
+                .final_layout(vk::ImageLayout::GENERAL)
+                .build()];
+
+            let render_pass_create_info = vk::RenderPassCreateInfo::builder()
+                .attachments(&attachment_description)
+                .subpasses(&subpass_description)
+                .dependencies(&subpass_dependencies);
+
+            match unsafe { device.create_render_pass(&render_pass_create_info, None) } {
+                Ok(pass) => pass,
+                Err(err) => unsafe {
+                    // Destroy the previous renderpass to prevent leaks
+                    device.destroy_render_pass(full_clear, None);
+
+                    return Err(VkError::from(err));
+                },
+            }
+        };
+
+        let render_passes = RenderPasses {
+            full_clear,
+            partial_clear,
+        };
+
+        self.renderpasses.insert(format, render_passes);
+
+        Ok(render_passes)
+    }
+
     fn recording_staging_buffer(&mut self) -> Result<vk::CommandBuffer, VkError> {
         if !self.recording_staging {
             let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);

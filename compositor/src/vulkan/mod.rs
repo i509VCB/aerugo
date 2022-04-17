@@ -116,7 +116,10 @@ mod test {
     use std::{error::Error, sync::Mutex};
 
     use slog::Drain;
-    use smithay::backend::renderer::{ImportMem, ImportMemWl};
+    use smithay::{
+        backend::renderer::{ImportMem, ImportMemWl, Renderer},
+        utils::Transform,
+    };
 
     use crate::vulkan::{device::Device, renderer::VulkanRenderer, version::Version};
 
@@ -165,6 +168,10 @@ mod test {
         let texture = renderer
             .import_memory(&[0xFF, 0xFF, 0xFF, 0xFF], (1, 1).into(), false)
             .expect("import");
+
+        renderer
+            .render((1, 1).into(), Transform::Normal, |_renderer, _frame| {})
+            .expect("render");
 
         Ok(())
     }

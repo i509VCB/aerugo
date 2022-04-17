@@ -402,7 +402,7 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     let ty = format!("{:?}", message_type).to_lowercase();
 
     match message_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => slog::debug!(logger, "{}", message ; "ty" => ty),
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => slog::trace!(logger, "{}", message ; "ty" => ty),
         vk::DebugUtilsMessageSeverityFlagsEXT::INFO => slog::trace!(logger, "{}", message ; "ty" => ty),
         vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => slog::warn!(logger, "{}", message ; "ty" => ty),
         vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => slog::error!(logger, "{}", message ; "ty" => ty),
