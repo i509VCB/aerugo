@@ -52,6 +52,10 @@ pub enum Error {
     /// [`Xrgb8888`]: wl_shm::Format::Xrgb8888
     #[error("the mandatory wl_shm formats are not supported")]
     MissingMandatoryFormats,
+
+    /// The maximum number of device allocations was reached.
+    #[error("the maximum number of device allocations ({0}) was reached")]
+    TooManyAllocations(usize),
 }
 
 /// TODO:
