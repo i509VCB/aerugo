@@ -80,6 +80,9 @@ pub struct VulkanRenderer {
     /// Command pool used to allocate the staging and rendering command buffers.
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
+    staging_command_buffer: vk::CommandBuffer,
+    /// Whether the staging command buffer is recording commands.
+    recording_staging: bool,
 
     allocator: AllocationIdTracker,
 
@@ -176,6 +179,8 @@ impl VulkanRenderer {
         let mut renderer = VulkanRenderer {
             command_pool: vk::CommandPool::null(),
             command_buffer: vk::CommandBuffer::null(),
+            staging_command_buffer: vk::CommandBuffer::null(),
+            recording_staging: false,
             allocator: AllocationIdTracker::new(device_properties.limits.max_memory_allocation_count as usize),
             staging_buffers: Vec::new(),
             submit_fence: vk::Fence::null(),
@@ -200,12 +205,13 @@ impl VulkanRenderer {
         let command_buffer_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(renderer.command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        renderer.command_buffer = unsafe { device_handle.allocate_command_buffers(&command_buffer_info) }
-            .map_err(VkError::from)?
-            .first()
-            .copied()
-            .unwrap();
+            .command_buffer_count(2);
+
+        let mut command_buffers =
+            unsafe { device_handle.allocate_command_buffers(&command_buffer_info) }.map_err(VkError::from)?;
+        // Remove backwards to prevent shifting.
+        renderer.command_buffer = command_buffers.remove(1);
+        renderer.staging_command_buffer = command_buffers.remove(0);
 
         // The fence is created as signalled for two reasons:
         // 1. The first frame rendered will not wait forever waiting for a previous frame that never happened.
@@ -323,6 +329,10 @@ impl Drop for VulkanRenderer {
             // signalled and the drop implementation continues.
             let _ = device.wait_for_fences(&[self.submit_fence], true, u64::MAX);
             device.destroy_fence(self.submit_fence, None);
+
+            // Since all command execution must be completed, destroy any staging buffers that were just
+            // executed.
+            self.free_staging_buffers();
         }
     }
 }
@@ -358,4 +368,34 @@ struct RenderTarget {
     framebuffer: vk::Framebuffer,
     width: u32,
     height: u32,
+}
+
+impl VulkanRenderer {
+    fn recording_staging_buffer(&mut self) -> Result<vk::CommandBuffer, VkError> {
+        if !self.recording_staging {
+            let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+            unsafe {
+                self.device
+                    .raw()
+                    .begin_command_buffer(self.staging_command_buffer, &begin_info)
+            }?;
+        }
+
+        Ok(self.staging_command_buffer)
+    }
+
+    /// # Safety
+    ///
+    /// Commands referring to the staging buffers must have completed execution.
+    unsafe fn free_staging_buffers(&mut self) {
+        let device = self.device.raw();
+
+        unsafe {
+            for staging_buffer in self.staging_buffers.drain(..) {
+                device.destroy_buffer(staging_buffer.buffer, None);
+                device.free_memory(staging_buffer.memory, None);
+            }
+        }
+    }
 }

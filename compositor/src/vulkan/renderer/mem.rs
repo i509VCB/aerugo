@@ -2,7 +2,7 @@ use std::ptr;
 
 use ash::vk;
 use smithay::{
-    backend::renderer::{ImportMem, ImportMemWl},
+    backend::renderer::{ImportMem, ImportMemWl, Texture},
     reexports::wayland_server::protocol::{wl_buffer, wl_shm},
     utils::{Buffer, Rectangle, Size},
     wayland::compositor,
@@ -94,15 +94,64 @@ impl ImportMem for VulkanRenderer {
             device.unmap_memory(device_memory);
         }
 
-        // Record copy command into the command buffer
-        self.staging_buffers.push(StagingBuffer {
+        // Record copy command.
+        let staging_buffer = StagingBuffer {
             buffer,
             buffer_size: data.len() as u64,
             memory: device_memory,
             memory_allocation_id: allocation_id,
-        });
+        };
 
-        // Cleanup buffer when copy is complete
+        let staging_command_buffer = match self.recording_staging_buffer() {
+            Ok(cb) => cb,
+            Err(err) => unsafe {
+                let device = self.device.raw();
+
+                // Destroy the buffer handle and device memory to prevent leaking
+                device.destroy_buffer(buffer, None);
+                device.free_memory(device_memory, None);
+
+                return Err(VkError::from(err).into());
+            },
+        };
+
+        let device = self.device.raw();
+
+        unsafe {
+            let image_extent = vk::Extent3D {
+                width: texture.width(),
+                height: texture.height(),
+                depth: 1,
+            };
+
+            let image_offset = vk::Offset3D { x: 0, y: 0, z: 0 };
+
+            let image_subresource = vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            };
+
+            let regions = [vk::BufferImageCopy {
+                buffer_offset: 0,
+                buffer_row_length: texture.width(),
+                buffer_image_height: texture.height(),
+                image_subresource,
+                image_offset,
+                image_extent,
+            }];
+
+            device.cmd_copy_buffer_to_image(
+                staging_command_buffer,
+                staging_buffer.buffer,
+                texture.image(),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &regions,
+            );
+        };
+
+        self.staging_buffers.push(staging_buffer);
 
         Ok(texture)
     }

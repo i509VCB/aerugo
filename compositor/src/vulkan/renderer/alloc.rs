@@ -13,7 +13,7 @@ use super::{Error, VulkanRenderer};
 
 // TODO: Move this to a module common to the allocator and renderer,
 // TODO: It's probably quite useful to expose Allocation in public api.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct AllocationIdTracker {
     // TODO: staging buffer utilities
     /// The current number of device allocations.
