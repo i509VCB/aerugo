@@ -189,6 +189,6 @@ pub fn fourcc_to_wl(fourcc: Fourcc) -> Option<wl_shm::Format> {
         Fourcc::Argb8888 => Some(wl_shm::Format::Argb8888),
         Fourcc::Xrgb8888 => Some(wl_shm::Format::Xrgb8888),
 
-        fourcc => wl_shm::Format::from_raw(fourcc as u32),
+        fourcc => wl_shm::Format::try_from(fourcc as u32).ok(),
     }
 }
