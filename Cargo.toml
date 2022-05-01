@@ -1,6 +1,7 @@
 [workspace]
 members = [
-	"compositor"
+	"hihiirokane",
+	"hihiirokane/compositor"
 ]
 
 # Enable LTO during release to make the binaries a bit smaller

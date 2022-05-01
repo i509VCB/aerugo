@@ -5,15 +5,15 @@ use std::{
 };
 
 use clap::{ArgGroup, Parser};
+use compositor::{backend::Backend, run, state::Socket};
 use slog::{error, o, Drain, Logger};
-use wayland_compositor::{backend::Backend, run, state::Socket};
 
 #[cfg(feature = "udev_backend")]
-use wayland_compositor::backend::udev::UdevBackend;
+use compositor::backend::udev::UdevBackend;
 #[cfg(feature = "wayland_backend")]
-use wayland_compositor::backend::wayland::WaylandBackend;
+use compositor::backend::wayland::WaylandBackend;
 #[cfg(feature = "x11_backend")]
-use wayland_compositor::backend::x11::X11Backend;
+use compositor::backend::x11::X11Backend;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();

@@ -1,0 +1,22 @@
+[package]
+name = "hihiirokane"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3.1.8", features = [ "derive" ] }
+slog = "2.1.1"
+slog-term = "2.8"
+slog-async = "2.2"
+slog-stdlog = "4.1.0"
+slog-scope = "4.4.0"
+
+[dependencies.compositor]
+package = "hihiirokane_compositor"
+path = "./compositor"
+
+[features]
+default = ["x11_backend"]
+
+# X11 backend to run as an X11 client.
+x11_backend = []
