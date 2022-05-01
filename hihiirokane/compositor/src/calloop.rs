@@ -4,6 +4,6 @@ use crate::state::Hihiirokane;
 
 #[derive(Debug)]
 pub struct CalloopData {
-    display: Display<Hihiirokane>,
-    state: Hihiirokane,
+    pub display: Display<Hihiirokane>,
+    pub state: Hihiirokane,
 }
