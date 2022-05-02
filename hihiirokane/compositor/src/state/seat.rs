@@ -3,12 +3,12 @@ use smithay::{
     wayland::seat::{SeatHandler, SeatState},
 };
 
-use super::Hihiirokane;
+use super::State;
 
-impl SeatHandler for Hihiirokane {
+impl SeatHandler for State {
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         todo!()
     }
 }
 
-delegate_seat!(Hihiirokane);
+delegate_seat!(State);

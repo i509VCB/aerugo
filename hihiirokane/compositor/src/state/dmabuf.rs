@@ -4,16 +4,20 @@ use smithay::{
     wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportError},
 };
 
-use super::Hihiirokane;
+use super::State;
 
-impl DmabufHandler for Hihiirokane {
+impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
-        todo!()
+        &mut self.protocols.dmabuf
     }
 
-    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, _dmabuf: Dmabuf) -> Result<(), ImportError> {
-        todo!()
+    fn dmabuf_imported(&mut self, global: &DmabufGlobal, dmabuf: Dmabuf) -> Result<(), ImportError> {
+        if self.backend.can_handle_dmabuf_global(global) {
+            self.backend.dmabuf_import(dmabuf)
+        } else {
+            Err(ImportError::Failed)
+        }
     }
 }
 
-delegate_dmabuf!(Hihiirokane);
+delegate_dmabuf!(State);

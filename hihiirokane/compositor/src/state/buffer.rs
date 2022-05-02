@@ -1,8 +1,8 @@
 use smithay::wayland::buffer::{Buffer, BufferHandler};
 
-use super::Hihiirokane;
+use super::State;
 
-impl BufferHandler for Hihiirokane {
+impl BufferHandler for State {
     fn buffer_destroyed(&mut self, _buffer: &Buffer) {
         todo!()
     }

@@ -4,9 +4,9 @@ use smithay::{
     wayland::compositor::{CompositorHandler, CompositorState},
 };
 
-use super::Hihiirokane;
+use super::State;
 
-impl CompositorHandler for Hihiirokane {
+impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.protocols.compositor
     }
@@ -16,4 +16,4 @@ impl CompositorHandler for Hihiirokane {
     }
 }
 
-delegate_compositor!(Hihiirokane);
+delegate_compositor!(State);
