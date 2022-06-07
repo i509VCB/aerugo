@@ -1,6 +1,6 @@
-pub mod client;
 pub mod state;
 
+// Misc stuff for upstream
 pub mod format;
 // pub mod vulkan;
 
@@ -9,13 +9,14 @@ use std::{error::Error, ffi::OsString, sync::Arc, time::Duration};
 use smithay::{
     reexports::{
         calloop::{self, EventLoop, LoopHandle},
-        wayland_server::Display,
+        wayland_server::{
+            backend::{ClientData, ClientId, DisconnectReason},
+            Display,
+        },
     },
     wayland::socket::ListeningSocketSource,
 };
 use state::Aerugo;
-
-use crate::client::DumbClientData;
 
 #[derive(Debug)]
 pub struct CalloopData {
@@ -70,6 +71,16 @@ impl CalloopData {
 
     pub fn running(&self) -> bool {
         self.state.running
+    }
+}
+
+pub struct DumbClientData;
+
+impl ClientData for DumbClientData {
+    fn initialized(&self, _: ClientId) {}
+
+    fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {
+        println!("{:?}: {:?}", client_id, reason);
     }
 }
 
