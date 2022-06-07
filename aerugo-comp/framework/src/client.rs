@@ -2,7 +2,7 @@ use smithay::reexports::wayland_server::backend::{ClientData, ClientId, Disconne
 
 pub struct DumbClientData;
 
-impl<D> ClientData<D> for DumbClientData {
+impl ClientData for DumbClientData {
     fn initialized(&self, _: ClientId) {}
 
     fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {

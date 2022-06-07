@@ -1,5 +1,5 @@
 [package]
-name = "hihiirokane"
+name = "aerugo_comp"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,9 +11,19 @@ slog-async = "2.2"
 slog-stdlog = "4.1.0"
 slog-scope = "4.4.0"
 
-[dependencies.compositor]
-package = "hihiirokane_compositor"
-path = "./compositor"
+[dependencies.framework]
+package = "aerugo_framework"
+path = "./framework"
+
+[dependencies.kms]
+package = "aerugo_kms"
+path = "./kms"
+optional = true
+
+[dependencies.windowed]
+package = "aerugo_windowed"
+path = "./windowed"
+optional = true
 
 [features]
 default = ["x11_backend"]
@@ -22,5 +32,5 @@ default = ["x11_backend"]
 x11_backend = []
 
 [[bin]]
-name = "hihiirokane"
+name = "aerugo"
 path = "main.rs"

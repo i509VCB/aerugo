@@ -1,7 +1,9 @@
 [workspace]
 members = [
-	"hihiirokane",
-	"hihiirokane/compositor"
+	"aerugo-comp",
+	"aerugo-comp/framework",
+	"aerugo-comp/kms",
+	"aerugo-comp/windowed",
 ]
 
 # Enable LTO during release to make the binaries a bit smaller

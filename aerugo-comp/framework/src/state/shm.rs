@@ -1,11 +1,11 @@
 use smithay::{delegate_shm, wayland::shm::ShmState};
 
-use super::State;
+use super::Aerugo;
 
-impl AsRef<ShmState> for State {
+impl AsRef<ShmState> for Aerugo {
     fn as_ref(&self) -> &ShmState {
         &self.protocols.shm
     }
 }
 
-delegate_shm!(State);
+delegate_shm!(Aerugo);
