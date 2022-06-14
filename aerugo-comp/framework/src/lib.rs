@@ -1,3 +1,4 @@
+pub mod client;
 pub mod state;
 
 // Misc stuff for upstream
@@ -19,24 +20,24 @@ use smithay::{
 use state::Aerugo;
 
 #[derive(Debug)]
-pub struct CalloopData {
+pub struct AerugoCompositor {
     pub state: Aerugo,
     pub display: Display<Aerugo>,
 }
 
-impl CalloopData {
+impl AerugoCompositor {
     // TODO: How to pass backends around?
     pub fn new(
-        _loop_handle: &LoopHandle<'_, CalloopData>,
+        _loop_handle: &LoopHandle<'_, AerugoCompositor>,
         display: Display<Aerugo>,
-    ) -> Result<CalloopData, Box<dyn Error>> {
-        Ok(CalloopData {
+    ) -> Result<AerugoCompositor, Box<dyn Error>> {
+        Ok(AerugoCompositor {
             state: Aerugo::new(&display.handle()),
             display,
         })
     }
 
-    pub fn run(mut self, mut event_loop: EventLoop<CalloopData>) -> calloop::Result<()> {
+    pub fn run(mut self, mut event_loop: EventLoop<AerugoCompositor>) -> calloop::Result<()> {
         let signal = event_loop.get_signal();
 
         event_loop.run(Duration::from_millis(5), &mut self, |aerugo| {
@@ -52,7 +53,10 @@ impl CalloopData {
         })
     }
 
-    pub fn create_socket(&mut self, loop_handle: &LoopHandle<'_, CalloopData>) -> Result<OsString, Box<dyn Error>> {
+    pub fn create_socket(
+        &mut self,
+        loop_handle: &LoopHandle<'_, AerugoCompositor>,
+    ) -> Result<OsString, Box<dyn Error>> {
         let socket = ListeningSocketSource::new_auto(None)?;
         println!("Using socket name {:?}", socket.socket_name());
 
@@ -86,11 +90,9 @@ impl ClientData for DumbClientData {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
-    use crate::CalloopData;
+    use crate::{client::SpawnClient, AerugoCompositor};
 
     #[test]
     fn run_simple() {
@@ -98,13 +100,13 @@ mod tests {
         let display = Display::new().unwrap();
         let loop_handle = event_loop.handle();
 
-        let mut aerugo = CalloopData::new(&loop_handle, display).unwrap();
+        let mut aerugo = AerugoCompositor::new(&loop_handle, display).unwrap();
         let socket_name = aerugo.create_socket(&loop_handle).unwrap();
 
         // TODO: Better client spawning
         {
-            Command::new("wayland-info")
-                .env("WAYLAND_DISPLAY", &socket_name)
+            SpawnClient::new("wayland-info")
+                .wayland_display(&socket_name)
                 .spawn()
                 .expect("spawn");
         }

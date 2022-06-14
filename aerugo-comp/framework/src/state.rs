@@ -4,7 +4,7 @@ use smithay::{
     reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1,
         wayland_server::{
-            protocol::{wl_buffer, wl_surface},
+            protocol::{wl_buffer, wl_output, wl_seat, wl_surface},
             DisplayHandle,
         },
     },
@@ -15,14 +15,15 @@ use smithay::{
         output::OutputManagerState,
         seat::{SeatHandler, SeatState},
         shell::{
-            wlr_layer::{LayerShellRequest, WlrLayerShellHandler, WlrLayerShellState},
+            wlr_layer::{self, WlrLayerShellHandler, WlrLayerShellState},
             xdg::{
                 self,
-                decoration::{XdgDecorationHandler, XdgDecorationManager},
-                XdgRequest, XdgShellHandler, XdgShellState,
+                decoration::{XdgDecorationHandler, XdgDecorationState},
+                XdgShellHandler, XdgShellState,
             },
         },
-        shm::ShmState,
+        shm::{ShmHandler, ShmState},
+        Serial,
     },
 };
 
@@ -51,7 +52,7 @@ pub struct Protocols {
     pub data_device: DataDeviceState,
     pub shm: ShmState,
     pub xdg_shell: XdgShellState,
-    pub xdg_decoration: XdgDecorationManager,
+    pub xdg_decoration: XdgDecorationState,
     pub layer_shell: WlrLayerShellState,
     // TODO:
     // - xdg-activation
@@ -98,8 +99,8 @@ impl Protocols {
             // Allocate with capacity of 2 because Argb8888/Xrgb8888 are always added.
             shm: ShmState::new::<Aerugo, _>(dh, Vec::with_capacity(2), None),
             // TODO: xdg-shell and xdg-decoration, remove GlobalId in tuple, make it a member of the types.
-            xdg_shell: XdgShellState::new::<Aerugo, _>(dh, None).0,
-            xdg_decoration: XdgDecorationManager::new::<Aerugo, _>(dh, None).0,
+            xdg_shell: XdgShellState::new::<Aerugo, _>(dh, None),
+            xdg_decoration: XdgDecorationState::new::<Aerugo, _>(dh, None),
             layer_shell: WlrLayerShellState::new::<Aerugo, _>(dh, None),
         }
     }
@@ -113,8 +114,8 @@ impl BufferHandler for Aerugo {
     }
 }
 
-impl AsRef<ShmState> for Aerugo {
-    fn as_ref(&self) -> &ShmState {
+impl ShmHandler for Aerugo {
+    fn shm_state(&self) -> &ShmState {
         &self.protocols.shm
     }
 }
@@ -157,7 +158,15 @@ impl XdgShellHandler for Aerugo {
         &mut self.protocols.xdg_shell
     }
 
-    fn request(&mut self, _dh: &DisplayHandle, _request: XdgRequest) {
+    fn new_toplevel(&mut self, _dh: &DisplayHandle, _surface: xdg::ToplevelSurface) {
+        todo!()
+    }
+
+    fn new_popup(&mut self, _dh: &DisplayHandle, _surface: xdg::PopupSurface, _positioner: xdg::PositionerState) {
+        todo!()
+    }
+
+    fn grab(&mut self, _dh: &DisplayHandle, _surface: xdg::PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
         todo!()
     }
 }
@@ -190,7 +199,14 @@ impl WlrLayerShellHandler for Aerugo {
         &mut self.protocols.layer_shell
     }
 
-    fn request(&mut self, _dh: &DisplayHandle, _request: LayerShellRequest) {
+    fn new_layer_surface(
+        &mut self,
+        _dh: &DisplayHandle,
+        _surface: wlr_layer::LayerSurface,
+        _output: Option<wl_output::WlOutput>,
+        _layer: wlr_layer::Layer,
+        _namespace: String,
+    ) {
         todo!()
     }
 }
