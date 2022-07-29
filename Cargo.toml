@@ -1,13 +1,17 @@
 [workspace]
 members = [
-	"aerugo-comp",
-	"aerugo-comp/framework",
-	"aerugo-comp/kms",
-	"aerugo-comp/windowed",
+	"compositor/aerugo",
+	"compositor/aerugo-framework",
+	"compositor/aerugo-kms",
+	"compositor/aerugo-windowed",
+
+	"client",
+
+	"app/launch",
 ]
 
 # Enable LTO during release to make the binaries a bit smaller
 [profile.release]
 lto = true
-opt-level = 'z'
+opt-level = 3
 strip = true

@@ -1,0 +1,25 @@
+[package]
+name = "aerugo"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "i509VCB <mail@i509.me>"
+]
+
+[dependencies.clap]
+version = "3.2.7"
+features = [
+    "derive",
+    "wrap_help"
+]
+
+[dependencies.aerugo-framework]
+path = "../aerugo-framework"
+
+[dependencies.kms]
+package = "aerugo-kms"
+path = "../aerugo-kms"
+
+[dependencies.windowed]
+package = "aerugo-windowed"
+path = "../aerugo-windowed"
