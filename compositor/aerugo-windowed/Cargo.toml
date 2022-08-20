@@ -2,6 +2,3 @@
 name = "aerugo-windowed"
 version = "0.1.0"
 edition = "2021"
-
-[dependencies.aerugo-framework]
-path = "../aerugo-framework"

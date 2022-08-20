@@ -13,8 +13,12 @@ features = [
     "wrap_help"
 ]
 
-[dependencies.aerugo-framework]
-path = "../aerugo-framework"
+[dependencies.smithay]
+git = "https://github.com/Smithay/smithay"
+default-features = false
+features = [
+    "wayland_frontend"
+]
 
 [dependencies.kms]
 package = "aerugo-kms"

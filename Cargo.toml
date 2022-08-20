@@ -1,7 +1,6 @@
 [workspace]
 members = [
 	"compositor/aerugo",
-	"compositor/aerugo-framework",
 	"compositor/aerugo-kms",
 	"compositor/aerugo-windowed",
 

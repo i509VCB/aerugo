@@ -6,10 +6,10 @@ version = 3
 name = "aerugo"
 version = "0.1.0"
 dependencies = [
- "aerugo-framework",
  "aerugo-kms",
  "aerugo-windowed",
  "clap",
+ "smithay",
 ]
 
 [[package]]
@@ -23,18 +23,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "aerugo-framework"
-version = "0.1.0"
-dependencies = [
- "smithay",
-]
-
-[[package]]
 name = "aerugo-kms"
 version = "0.1.0"
-dependencies = [
- "aerugo-framework",
-]
 
 [[package]]
 name = "aerugo-launch"
@@ -46,9 +36,6 @@ dependencies = [
 [[package]]
 name = "aerugo-windowed"
 version = "0.1.0"
-dependencies = [
- "aerugo-framework",
-]
 
 [[package]]
 name = "appendlist"
