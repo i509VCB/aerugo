@@ -3,17 +3,8 @@ name = "aerugo-client"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.wayland-client]
-version = "=0.30.0-beta.8"
-
-[dependencies.wayland-backend]
-version = "=0.1.0-beta.8"
-# System libraries are required for hardware accelerated graphics.
-features = ["client_system"]
-
-[dependencies.sctk]
-package = "smithay-client-toolkit"
-git = "https://github.com/Smithay/client-toolkit/"
-
 [dependencies]
-calloop = "0.10.1"
+calloop = { workspace = true }
+sctk = { workspace = true }
+wayland-backend = { workspace = true }
+zbus = { workspace = true }

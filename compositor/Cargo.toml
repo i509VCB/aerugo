@@ -1,0 +1,13 @@
+[package]
+name = "aerugo-comp"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "i509VCB <mail@i509.me>"
+]
+
+[dependencies]
+ash = { workspace = true }
+bitflags = { workspace = true }
+clap = { workspace = true }
+smithay = { workspace = true }
