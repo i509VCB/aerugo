@@ -1,23 +1,76 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="aerugo_wm_v1">
     <copyright>
-        TODO
     </copyright>
 
     <interface name="aerugo_wm_v1" version="1">
         <description>
-            The aerugo_wm_v1 interface provides a way for an Aerugo based Wayland compositor to be controlled
-            by a WM in the WM process.
+            The aerugo_wm_v1 interface provides a way for a Wayland compositor to be controlled by a
+            WM client.
+
+            The compositors may choose to restrict this protocol to a special client launched by the
+            compositor. If a compositor has given a client access to the protocol, this interface must
+            be exposed as a global.
+
+            In order to advertise this extension, the compositor must support the following protocols:
+            - wl_compositor
+            - wl_seat
+            - ext_foreign_toplevel_info_v1
+            - ext_foreign_toplevel_management_v1
+
+            Compositors must ensure that only 1 aerugo_wm_v1 object may be constructed per client.
+            If the aerugo_wm_v1 has already been created, the compositor must send a
+            aerugo_wm_v1.error.already_constructed error.
+
+            Only one client may be the WM at a time. If another client is trying to become the WM
+            and access is denied, the new client must be sent the aerugo_wm_v1.finished event. If
+            the new client is granted access, the old client must be sent the aerugo_wm_v1.finished
+            event.
+
+            TODO:
+            - Finish aerugo_wm_graph
+            - Finish aerugo_wm_graph_node_v1
+            - Questions around aerugo_wm_graph_node_v1
+              - Should subsurfaces be allowed?
+                - Yes
+              - It is a wl_surface role, do we need to deal with the double buffered state around it?
+              - There are a lot of things not needed.
+              - But if the WM wants to render something, then these things are needed.
+              - Do the surfaces have an implied attached buffer?
+              - How do we want to deal with input? The WM may want to redirect input if possible.
+                - I guess we could use the serial in an event to tell whether the redirection should occur or
+                  not.
+              - For replacing a surface's buffer, attaching a buffer makes sense then.
+            - General architectural questions
+              - I want a way to get the content of a surface and import it into WM so the WM can modify the
+                buffer contents. This effectively requires a sort of screencopy like interface.
+            - Data devices
+            - Other protocol dependencies
+              - Should be require specific versions of some protocols as well?
         </description>
 
         <enum name="error">
-            <entry name="unresponsive" value="0"
+            <entry name="already_constructed" value="0"
+                    summary="the global has already been constructed for this client"/>
+
+            <entry name="dead_wm" value="2"
+                    summary="a protocol object was used when the wm is finished"/>
+
+            <entry name="defunct_objects" value="3"
+                    summary="a child protocol object was used when the wm is finished"/>
+
+            <entry name="unresponsive" value="1"
                    summary="the wm did not respond to a ping event in time"/>
         </enum>
 
         <request name="destroy" type="destructor">
             <description summary="destroy the aerugo_wm_v1 object">
                 Destroys the aerugo_wm_v1 object.
+
+                The client must destroy all child objects created by the aerugo_wm_v1 protocol object.
+                Otherwise the aerugo_wm_v1.error.defunt_objects error must be sent.
+
+                Once the destructor is request is sent, a new aerugo_wm_v1 may be created.
             </description>
         </request>
 
@@ -26,8 +79,17 @@
                 The server has decided the wm should be destroyed. When this event is sent, the global should
                 be destroyed.
 
-                This event is intended to allow for graceful wm shutdown. However if the wm is unresponsive,
-                then the wm will be killed with the aerugo_wm_v1.error.unresponsive error.
+                This may be recived for a varying number of reasons, including but not limited to:
+                - Compositor shutdown
+                - The WM client is being replaced.
+                - The client trying to become the WM was denied access.
+
+                This event is intended to allow for graceful client shutdown. However if the wm is
+                unresponsive, then the wm will be killed with the aerugo_wm_v1.error.unresponsive error.
+
+                After this event is sent, all child protocol objects may only be destroyed. If an requests are
+                sent on the aerugo_wm_v1 protocol object or any child protocol objects, the
+                aerugo_wm_v1.error.dead_wm error must be sent.
             </description>
         </event>
 
@@ -46,7 +108,7 @@
                 The ping event asks if the wm is still alive. The serial in this event must be passed back in
                 the "pong" event in some amount of time to be kept alive.
 
-                If the wm is unresponsive, the server may decide when the wm is considered dead and therefore
+                If the wm is unresponsive, the server may decide when the wm is considered dead and
                 disconnected.
 
                 See aerugo_wm_v1.ping and aerugo_wm_v1.error.unresponsive for more information.
@@ -59,8 +121,75 @@
         <description>
             This interface defines a scene graph used to describe the layout of surfaces.
 
-            A scene graph also provides a mechanism for the server and wm to raycast into the surface
-            heirarchy.
+            A graph is built by the client side by sending multiple requests to the graph protocol object
+            and then committing the graph state. This is similar to how wl_surface's double-buffered
+            state is managed. This allows the WM's placement of surfaces to be done atomically.
+
+            A graph is made of a sequence of nodes laid out in a 2D coordinate space. The graph is used for
+            presentation and processing input events.
         </description>
+
+        <event name="rebuild", summary="Compositor request to update the graph">
+            <description>
+                TODO: This needs to be like the configure events.
+
+                The compositor requests the WM updates the graph.
+
+                The WM must respond by sending the aerugo_wm_graph_v1.commit request, regardless of whether
+                the graph contents have changed.
+
+                Compositors which suspect their WMs are taking to long to rebuild may query whether the WM
+                is responsive by sending a aerugo_wm_v1.ping event.
+            </description>
+        </event>
+
+        <request name="commit", summary="Commit pending graph state">
+            <description>
+            </description>
+        </request>
+
+        <request name="create_toplevel_surface">
+            <description>
+            </description>
+
+            <arg name="surface" type="object" interface="wl_surface"/>
+            <arg name="toplevel" type="object" interface="ext_foreign_toplevel_info_v1"/>
+            <arg name="id" type="new_id" interface="aerugo_wm_graph_node_v1"/>
+        </request>
+
+        <request name="create_managed_surface">
+            <description>
+            </description>
+
+            <arg name="surface" type="object" interface="wl_surface"/>
+            <arg name="id" type="new_id" interface="aerugo_wm_graph_node_v1"/>
+        </request>
+
+        <request name="destroy" type="destructor">
+            <description summary="destroy the aerugo_wm_graph_v1 object">
+                Destroys the aerugo_wm_graph_v1 object.
+            </description>
+        </request>
+    </interface>
+
+    <interface name="aerugo_wm_graph_node_v1" version="1">
+        <description>
+            This interface defines a wl_surface role to represent a node in a scene graph.
+
+            This may seem like a bizzare protocol implementation choice to implementors, but this allows 
+            using the preexisting wl_seat and related input protocols for handling input.
+
+            A node may be created from a wl_surface and ext_foreign_toplevel_handle_v1, representing a
+            toplevel surface's contents opaquely or from a wl_surface which is managed by the WM.
+        </description>
+
+        <request name="destroy" type="destructor">
+            <description summary="destroy the aerugo_wm_graph_node_v1 object">
+                Destroys the aerugo_wm_graph_node_v1 object.
+
+                This protocol object must be created before the wl_surface that was used to create the
+                surface.
+            </description>
+        </request>
     </interface>
 </protocol>

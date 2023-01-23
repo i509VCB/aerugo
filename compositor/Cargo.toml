@@ -9,5 +9,9 @@ authors = [
 [dependencies]
 ash = { workspace = true }
 bitflags = { workspace = true }
+calloop = { workspace = true }
 clap = { workspace = true }
 smithay = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+wayland-server = { workspace = true }

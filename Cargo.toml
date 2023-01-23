@@ -3,7 +3,6 @@ resolver = "2"
 members = [
 	"compositor",
 	"wm",
-	"app/launch",
 ]
 
 [workspace.package]
@@ -21,14 +20,9 @@ features = [
 	"wrap_help"
 ]
 
-[workspace.dependencies.sctk]
-package = "smithay-client-toolkit"
-git = "https://github.com/i509VCB/client-toolkit/"
-branch = "beta15"
-
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
-rev = "f73bdaef93ce5993a317848bb8b90ca04e86a4b9"
+rev = "ffbc84e6fb6d45f10b94cdb08bcbcbcadbc7a35f"
 default-features = false
 features = [
 	"backend_egl",
@@ -43,46 +37,35 @@ features = [
 ]
 
 [workspace.dependencies.wayland-backend]
-version = "0.1.0-beta.15"
-# System libraries are required for hardware accelerated graphics for the client.
-features = ["client_system"]
+version = "0.1.0"
 
 [workspace.dependencies.wayland-scanner]
-version = "0.30.0-beta.15"
+version = "0.30.0"
 
 [workspace.dependencies.wayland-server]
-version = "0.30.0-beta.15"
-
-[workspace.dependencies.mpris2]
-git = "https://github.com/pop-os/mpris2-zbus"
+version = "0.30.0"
 
 [workspace.dependencies.calloop]
-version = "0.10.4"
+version = "0.10.5"
 features = ["executor"]
 
 [workspace.dependencies.nix]
-version = "0.26.1"
+version = "0.26.2"
 
 [workspace.dependencies.aerugo-client]
 path = "client"
 
-[workspace.dependencies.aerugo-wk]
+[workspace.dependencies.aerugo-wm]
 path = "wm"
 
 [workspace.dependencies]
-ash = "0.37.1"
+ash = "0.37.2"
 ashpd = "0.3.2"
 bitflags = "2.0.0-rc.1"
-cosmic-text = "0.6.0"
-evalexpr = "8.1.0"
-image = "0.24.5"
-inotify = "0.10.0"
-lyon = "1.0.1"
-pollster = "0.2.5"
 thiserror = "1.0.38"
-wasmtime = "4.0.0"
-wgpu = "0.14.2"
-zbus = "3.6.2"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"
+zbus = "3.7.0"
 
 # Enable LTO during release to make the binaries a bit smaller
 [profile.release]

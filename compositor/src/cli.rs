@@ -4,7 +4,7 @@ use clap::{Parser, ValueEnum};
 
 /// The Aerugo wayland compositor
 #[deny(missing_docs)]
-#[derive(Parser, Debug, Clone, Copy)]
+#[derive(Parser, Debug)]
 #[clap(about = "A Wayland compositor written in Rust", author, version)]
 pub struct AerugoArgs {
     /// Backend selection
@@ -22,13 +22,23 @@ pub struct AerugoArgs {
     /// The `x11` and `wayland` options both act like `windowed`, but allow specifying whether aerugo is run as an X11
     /// or Wayland client.
     #[clap(value_enum, default_value_t, short, long)]
-    pub backend: BackendSelection,
+    pub backend: Backend,
+
+    /// Renderer selection
+    ///
+    /// This allows overriding the renderer to use at runtime. This may be useful in case of driver bugs.
+    ///
+    /// Right now only the OpenGL ES renderer is supported. In the future a Vulkan renderer will be available.
+    #[clap(value_enum, default_value_t, long)]
+    pub renderer: Renderer,
+    // TODO: WM process to start
+    // TODO: How should the WM spawn privileged clients?
 }
 
 /// Enum containing all possible backend selections.
 #[deny(missing_docs)]
 #[derive(ValueEnum, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum BackendSelection {
+pub enum Backend {
     /// Automatically choose the backend depending on the environment.
     #[default]
     Auto,
@@ -51,4 +61,20 @@ pub enum BackendSelection {
     /// Launch the compositor inside a window as an X11 client.
     #[clap(alias("x"))]
     X11,
+}
+
+/// Enum containing all possible renderer backends
+#[deny(missing_docs)]
+#[derive(ValueEnum, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Renderer {
+    /// Select the most optimal, supported renderer.
+    #[default]
+    Default,
+
+    /// Use the OpenGL ES renderer.
+    #[clap(alias("egl"))]
+    #[clap(alias("gl"))]
+    Gles,
+    // #[clap(alias("vk"))]
+    // Vulkan, // TODO
 }
