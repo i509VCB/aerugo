@@ -70,7 +70,7 @@ impl Aerugo {
         if shutdown {
             // Signal the event loop to stop
             self.signal.stop();
-            // In order to stop the event loop quickly after stopping it, we need to wake the event loop.
+            // In order to terminate the event loop quickly after stopping it, we need to wake the event loop.
             self.signal.wakeup();
         }
     }
@@ -109,7 +109,6 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
 pub struct AerugoCompositor {
     display: DisplayHandle,
     wl_compositor: CompositorState,
-    wl_shm: ShmState,
     xdg_shell: XdgShellState,
     seat_state: SeatState<Self>,
     backend: Box<dyn Backend>,
@@ -122,14 +121,11 @@ impl AerugoCompositor {
         // Initialize common globals
         let seat_state = SeatState::new();
         let wl_compositor = CompositorState::new::<Self, _>(&display, None);
-        // TODO: Provide additional shm formats with renderer info.
-        let wl_shm = ShmState::new::<Self, _>(&display, Vec::with_capacity(2), None);
         let xdg_shell = XdgShellState::new::<Self, _>(&display, None);
 
         Self {
             display,
             wl_compositor,
-            wl_shm,
             xdg_shell,
             seat_state,
             backend,
@@ -153,7 +149,7 @@ delegate_compositor!(AerugoCompositor);
 
 impl ShmHandler for AerugoCompositor {
     fn shm_state(&self) -> &ShmState {
-        &self.wl_shm
+        self.backend.shm_state()
     }
 }
 

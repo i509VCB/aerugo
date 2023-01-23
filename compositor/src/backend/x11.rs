@@ -3,16 +3,23 @@
 use calloop::LoopHandle;
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
-    wayland::dmabuf::{DmabufGlobal, DmabufState, ImportError},
+    wayland::{
+        dmabuf::{DmabufGlobal, DmabufState, ImportError},
+        shm::ShmState,
+    },
 };
 use wayland_server::DisplayHandle;
 
-use crate::{cli::AerugoArgs, state::Aerugo};
+use crate::{
+    cli::AerugoArgs,
+    state::{Aerugo, AerugoCompositor},
+};
 
 #[derive(Debug)]
 pub struct Backend {
     r#loop: LoopHandle<'static, Aerugo>,
     display: DisplayHandle,
+    shm_state: ShmState,
 }
 
 impl Backend {
@@ -21,11 +28,17 @@ impl Backend {
         Ok(Self {
             r#loop: r#loop.clone(),
             display: display.clone(),
+            // TODO: Renderer shm formats
+            shm_state: ShmState::new::<AerugoCompositor, _>(display, Vec::with_capacity(2), None),
         })
     }
 }
 
 impl crate::backend::Backend for Backend {
+    fn shm_state(&self) -> &ShmState {
+        &self.shm_state
+    }
+
     fn dmabuf_state(&mut self) -> &mut DmabufState {
         todo!("X11 does not initialize the dmabuf global yet")
     }

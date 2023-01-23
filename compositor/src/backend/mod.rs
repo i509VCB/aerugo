@@ -5,13 +5,18 @@ use std::fmt;
 use calloop::LoopHandle;
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
-    wayland::dmabuf::{DmabufGlobal, DmabufState, ImportError},
+    wayland::{
+        dmabuf::{DmabufGlobal, DmabufState, ImportError},
+        shm::ShmState,
+    },
 };
 use wayland_server::DisplayHandle;
 
 use crate::{cli::AerugoArgs, state::Aerugo};
 
 pub trait Backend: fmt::Debug {
+    fn shm_state(&self) -> &ShmState;
+
     /// Return the delegate type for the dmabuf protocol state.
     ///
     /// This is managed by the backend since not every backend might support the dmabuf protocol.
