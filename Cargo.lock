@@ -10,6 +10,7 @@ dependencies = [
  "bitflags 2.0.0-rc.1",
  "calloop",
  "clap",
+ "downcast-rs",
  "smithay",
  "tracing",
  "tracing-subscriber",

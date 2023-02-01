@@ -32,7 +32,7 @@
             - Finish aerugo_wm_graph_node_v1
             - Questions around aerugo_wm_graph_node_v1
               - Should subsurfaces be allowed?
-                - Yes
+                - Yes?
               - It is a wl_surface role, do we need to deal with the double buffered state around it?
               - There are a lot of things not needed.
               - But if the WM wants to render something, then these things are needed.

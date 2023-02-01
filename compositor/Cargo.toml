@@ -11,6 +11,7 @@ ash = { workspace = true }
 bitflags = { workspace = true }
 calloop = { workspace = true }
 clap = { workspace = true }
+downcast-rs = { workspace = true }
 smithay = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

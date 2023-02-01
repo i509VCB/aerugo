@@ -1,8 +1,9 @@
 mod x11;
 
-use std::fmt;
+use std::{any::Any, fmt};
 
 use calloop::LoopHandle;
+use downcast_rs::{impl_downcast, Downcast};
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
     wayland::{
@@ -14,7 +15,7 @@ use wayland_server::DisplayHandle;
 
 use crate::{cli::AerugoArgs, state::Aerugo};
 
-pub trait Backend: fmt::Debug {
+pub trait Backend: fmt::Debug + Downcast {
     fn shm_state(&self) -> &ShmState;
 
     /// Return the delegate type for the dmabuf protocol state.
@@ -35,6 +36,7 @@ pub trait Backend: fmt::Debug {
     // TODO: Outputs?
     // TODO: Seat?
 }
+impl_downcast!(Backend);
 
 pub fn create_backend(
     r#loop: &LoopHandle<'static, Aerugo>,

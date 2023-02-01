@@ -74,6 +74,10 @@ impl Aerugo {
             self.signal.wakeup();
         }
     }
+
+    pub fn compositor(&mut self) -> &mut AerugoCompositor {
+        &mut self.comp
+    }
 }
 
 fn register_display_source(display: &mut Display<AerugoCompositor>, r#loop: &LoopHandle<'static, Aerugo>) {
@@ -111,7 +115,7 @@ pub struct AerugoCompositor {
     wl_compositor: CompositorState,
     xdg_shell: XdgShellState,
     seat_state: SeatState<Self>,
-    backend: Box<dyn Backend>,
+    pub backend: Box<dyn Backend>,
 }
 
 impl AerugoCompositor {
