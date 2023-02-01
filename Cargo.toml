@@ -52,9 +52,6 @@ features = ["executor"]
 [workspace.dependencies.nix]
 version = "0.26.2"
 
-[workspace.dependencies.aerugo-client]
-path = "client"
-
 [workspace.dependencies.aerugo-wm]
 path = "wm"
 

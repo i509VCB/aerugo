@@ -11,12 +11,7 @@ mod state;
 fn main() {
     let args = cli::AerugoArgs::parse();
 
-    let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::TRACE)
-        // completes the builder.
-        .finish();
+    let subscriber = FmtSubscriber::builder().with_max_level(Level::TRACE).finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
