@@ -17,10 +17,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::{
-    cli::AerugoArgs,
-    state::{Aerugo, AerugoCompositor},
-};
+use crate::{cli::AerugoArgs, Aerugo, AerugoCompositor};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -93,7 +90,7 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
 
     match event {
         X11Event::Refresh { window_id: _ } => {
-            let backend = get_backend(aerugo.compositor());
+            let backend = get_backend(&mut aerugo.comp);
             let (buffer, _age) = backend.surface.buffer().unwrap();
             backend.renderer.bind(buffer).unwrap();
 
@@ -131,7 +128,7 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
         X11Event::PresentCompleted { window_id: _ } => {}
         X11Event::CloseRequested { window_id: _ } => {
             // TODO: shutdown based on output counts
-            let backend = get_backend(aerugo.compositor());
+            let backend = get_backend(&mut aerugo.comp);
             backend.shutdown = true;
             aerugo.check_shutdown();
         }

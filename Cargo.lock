@@ -11,6 +11,7 @@ dependencies = [
  "calloop",
  "clap",
  "downcast-rs",
+ "slotmap",
  "smithay",
  "tracing",
  "tracing-subscriber",

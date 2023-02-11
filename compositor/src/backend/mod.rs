@@ -1,6 +1,6 @@
 mod x11;
 
-use std::{any::Any, fmt};
+use std::fmt;
 
 use calloop::LoopHandle;
 use downcast_rs::{impl_downcast, Downcast};
@@ -13,7 +13,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::{cli::AerugoArgs, state::Aerugo};
+use crate::{cli::AerugoArgs, Aerugo};
 
 pub trait Backend: fmt::Debug + Downcast {
     fn shm_state(&self) -> &ShmState;
