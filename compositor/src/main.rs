@@ -12,7 +12,7 @@ use smithay::{
 };
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-use wayland_server::{Display, DisplayHandle};
+use wayland_server::{Display, DisplayHandle, protocol::wl_surface, backend::ObjectId};
 
 mod backend;
 mod buffer;
