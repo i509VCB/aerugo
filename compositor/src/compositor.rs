@@ -15,6 +15,8 @@ impl CompositorHandler for AerugoCompositor {
         // Let smithay take over buffer handling
         on_commit_buffer_handler(surface);
 
+        // Allow smithay to import buffers for us
+
         self.shell.commit(surface);
     }
 }

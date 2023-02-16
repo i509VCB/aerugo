@@ -7,6 +7,7 @@ authors = [
 ]
 
 [dependencies]
+ahash = { workspace = true }
 ash = { workspace = true }
 bitflags = { workspace = true }
 calloop = { workspace = true }

@@ -1,10 +1,12 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    borrow::Borrow,
+    collections::{hash_map::Entry, HashMap},
+};
 
 use slotmap::{new_key_type, SlotMap};
 use smithay::{
     output::Output,
     utils::{Physical, Point},
-    wayland::{compositor, shell::xdg::ToplevelSurface},
 };
 use wayland_server::{backend::ObjectId, protocol::wl_surface, Resource};
 
@@ -13,7 +15,8 @@ mod xdg_shell;
 // TODO: Layer shell
 // TODO: Aerugo shell implementation
 
-// TODO: Surfaces should be independently displayable from the graph. i.e. a surface can be in multiple graphs.
+#[allow(dead_code)]
+// TODO: Remove when used
 
 /*
 TODO: Transactions
@@ -29,34 +32,32 @@ that in the transaction).
 
 If the clients fail to commit the previous transaction states, should the WM's next state override the current
 client state, and cancel the previous transaction?
-
-I guess I will need to seperate the scene graph used for rendering and then the WM state.
-
 */
-
-// TODO: Maybe better to call it a scene graph? This is the representation post XDG shell and XWayland.
 #[derive(Debug, Default)]
-pub struct Shell {
-    /// Shell graph nodes.
+pub struct Graph {
+    /// Storage of all surface nodes.
     ///
-    /// A slotmap is used for stable keys and to reuse heap allocations that represent the nodes in the graph.
-    nodes: SlotMap<NodeIndex, Node>,
-
-    /// Outputs mapped in the shell.
-    ///
-    /// The value of the map is a node index, which references a node in the scene graph.
-    outputs: HashMap<Output, NodeIndex>,
+    /// A SlotMap is used for stable indices.
+    surfaces: SlotMap<SurfaceIndex, SurfaceNode>,
 
     /// Mapping from surface (object id) to a node.
-    surface_to_node: HashMap<ObjectId, NodeIndex>,
+    surface_to_node: HashMap<ObjectId, SurfaceIndex, ahash::RandomState>,
+
+    /// Storage of all surface nodes.
+    ///
+    /// A SlotMap is used for stable indices.
+    graphs: SlotMap<GraphIndex, GraphNode>,
+
+    /// Outputs which have a bound node.
+    outputs: HashMap<Output, OutputInfo>,
 }
 
-impl Shell {
+impl Graph {
     pub fn commit(&mut self, surface: &wl_surface::WlSurface) {
         // If the surface is not known, create a node for the surface.
         let entry = self.surface_to_node.entry(surface.id());
         let _surface_index = entry.or_insert_with(|| {
-            let index = self.nodes.insert_with_key(|index| Node {
+            let index = self.surfaces.insert_with_key(|index| SurfaceNode {
                 index,
                 surface: surface.clone(),
                 parent: None,
@@ -65,22 +66,39 @@ impl Shell {
 
             index
         });
+
+        // TODO: Lower subsurface tree into the surface nodes
     }
 
     pub fn surface_destroyed(&mut self, surface: &wl_surface::WlSurface) {
         if let Entry::Occupied(entry) = self.surface_to_node.entry(surface.id()) {
             let index = entry.remove();
-            let node = self.nodes.remove(index).unwrap();
+            let node = self.surfaces.remove(index).unwrap();
 
             // Remove the node from it's parents and children
             if let Some(parent) = node.parent {
-                if let Some(parent) = self.nodes.get_mut(parent) {
-                    parent.children.retain(|node| node.index == index);
+                match parent {
+                    NodeIndex::Surface(parent) => {
+                        if let Some(parent) = self.surfaces.get_mut(parent) {
+                            parent.children.retain(|node| node.index == index);
+                        }
+                    }
+
+                    NodeIndex::Graph(parent) => {
+                        if let Some(parent) = self.graphs.get_mut(parent) {
+                            parent.children.retain(
+                                // bizzare rustfmt output...
+                                |&ChildNode {
+                                     index: parent_index, ..
+                                 }| { parent_index != NodeIndex::Surface(index) },
+                            );
+                        }
+                    }
                 }
             }
 
             for child in node.children.iter() {
-                if let Some(child) = self.nodes.get_mut(child.index) {
+                if let Some(child) = self.surfaces.get_mut(child.index) {
                     child.parent.take();
                 }
             }
@@ -98,53 +116,126 @@ impl Shell {
 
     // TODO: Traverse nodes mapped in an output.
 
-    pub fn node(&self, surface: &wl_surface::WlSurface) -> Option<&Node> {
+    pub fn get_surface(&self, surface: &wl_surface::WlSurface) -> Option<&SurfaceNode> {
         let index = self.surface_to_node.get(&surface.id())?;
-        self.nodes.get(*index)
+        self.surfaces.get(*index)
     }
 
-    pub fn node_mut(&mut self, surface: &wl_surface::WlSurface) -> Option<&mut Node> {
+    pub fn get_surface_mut(&mut self, surface: &wl_surface::WlSurface) -> Option<&mut SurfaceNode> {
         let index = self.surface_to_node.get(&surface.id())?;
-        self.nodes.get_mut(*index)
+        self.surfaces.get_mut(*index)
     }
 }
 
-new_key_type! { pub struct NodeIndex; }
+new_key_type! {
+    /// A stable index to reference a [`SurfaceNode`].
+    pub struct SurfaceIndex;
+
+    /// A stable index to reference a [`GraphNode`]
+    pub struct GraphIndex;
+}
+
+/// A stable index to a node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NodeIndex {
+    /// The index references a surface.
+    Surface(SurfaceIndex),
+
+    /// The index references a graph.
+    Graph(GraphIndex),
+}
+
+impl From<SurfaceIndex> for NodeIndex {
+    fn from(value: SurfaceIndex) -> Self {
+        Self::Surface(value)
+    }
+}
+
+impl From<GraphIndex> for NodeIndex {
+    fn from(value: GraphIndex) -> Self {
+        Self::Graph(value)
+    }
+}
 
 #[derive(Debug)]
-pub struct Node {
-    index: NodeIndex,
-    // TODO: Surface, etc...
-    // TODO: Should an output be a valid node?
-    //       That would allow for things for floating outputs which contain windows, but that is much more
-    //       complicated. It would also be useful then to have a way to scale a surface for such a use.
-    /// The surface which represents the contents of the node.
+pub struct SurfaceNode {
+    index: SurfaceIndex,
+
     surface: wl_surface::WlSurface,
 
-    /// Parent of this node.
+    /// The parent node of this surface.
     parent: Option<NodeIndex>,
 
-    /// Children of this node.
-    children: Vec<ChildNode>,
+    /// Subsurface children of this surface.
+    ///
+    /// A surface can only have subsurfaces as children.
+    ///
+    /// Although wl_surface already provides a way to get the subsurfaces, the indices of the subsurfaces
+    /// are tracked to allow quickly building a graph.
+    children: Vec<ChildNode<SurfaceIndex>>,
 }
 
-impl Node {
-    pub fn index(&self) -> NodeIndex {
+impl SurfaceNode {
+    /// The index of this surface.
+    ///
+    /// This may be used to reference this surface in other nodes, such as a graph node.
+    pub fn index(&self) -> SurfaceIndex {
         self.index
     }
 
+    /// The underlying `wl_surface` of this node.
     pub fn wl_surface(&self) -> &wl_surface::WlSurface {
         &self.surface
     }
+}
 
-
-    // TODO: Get surface tree of node?
-    //       The other option would be to put the tree into the graph on behalf of the user and let the
-    //       compositor manage the surface tree of subsurfacesw.
+impl Borrow<SurfaceIndex> for SurfaceNode {
+    fn borrow(&self) -> &SurfaceIndex {
+        &self.index
+    }
 }
 
 #[derive(Debug)]
-struct ChildNode {
+pub struct GraphNode {
+    index: GraphIndex,
+
+    /// A graph can only have another graph as it's parent.
+    parent: Option<GraphIndex>,
+
+    /// Children of this graph.
+    children: Vec<ChildNode<NodeIndex>>,
+}
+
+impl GraphNode {
+    /// The index of this graph node.
+    ///
+    /// This may be used to reference this graph in other graph nodes or as the graph to be presented.
+    pub fn index(&self) -> GraphIndex {
+        self.index
+    }
+}
+
+impl Borrow<GraphIndex> for GraphNode {
+    fn borrow(&self) -> &GraphIndex {
+        &self.index
+    }
+}
+
+#[derive(Debug)]
+struct ChildNode<Index> {
+    index: Index,
+
+    /// The transform relative to the parent node.
+    ///
+    /// If there is no parent, then this is relative to the origin of the global coordinate space.
+    transform: Point<i32, Physical>,
+}
+
+#[derive(Debug)]
+struct OutputInfo {
+    /// Index of the root of the graph to be presented
+    ///
+    /// This may be a single surface if in full screen, or a graph node for compositing.
     index: NodeIndex,
-    offset: Point<i32, Physical>,
+    // TODO: Damage?
 }

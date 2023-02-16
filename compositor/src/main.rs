@@ -4,7 +4,7 @@ use backend::Backend;
 use calloop::{generic::Generic, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 use clap::Parser;
 use cli::AerugoArgs;
-use shell::Shell;
+use shell::Graph;
 use smithay::{
     input::SeatState,
     reexports::calloop::EventLoop,
@@ -12,7 +12,7 @@ use smithay::{
 };
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-use wayland_server::{Display, DisplayHandle, protocol::wl_surface, backend::ObjectId};
+use wayland_server::{Display, DisplayHandle};
 
 mod backend;
 mod buffer;
@@ -107,7 +107,7 @@ pub struct AerugoCompositor {
     wl_compositor: CompositorState,
     xdg_shell: XdgShellState,
     seat_state: SeatState<Self>,
-    shell: Shell,
+    shell: Graph,
     backend: Box<dyn Backend>,
 }
 
@@ -125,7 +125,7 @@ impl AerugoCompositor {
             wl_compositor,
             xdg_shell,
             seat_state,
-            shell: Shell::default(),
+            shell: Graph::default(),
             backend,
         }
     }

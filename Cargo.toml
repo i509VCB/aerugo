@@ -56,6 +56,7 @@ version = "0.26.2"
 path = "wm"
 
 [workspace.dependencies]
+ahash = "0.8.3"
 ash = "0.37.2"
 ashpd = "0.3.2"
 bitflags = "2.0.0-rc.1"
