@@ -7,12 +7,12 @@ authors = [
 ]
 
 [dependencies]
-ahash = { workspace = true }
 ash = { workspace = true }
 bitflags = { workspace = true }
 calloop = { workspace = true }
 clap = { workspace = true }
 downcast-rs = { workspace = true }
+rustc-hash = { workspace = true }
 smithay = { workspace = true }
 slotmap = { workspace = true }
 tracing = { workspace = true }

@@ -56,12 +56,12 @@ version = "0.26.2"
 path = "wm"
 
 [workspace.dependencies]
-ahash = "0.8.3"
 ash = "0.37.2"
 ashpd = "0.3.2"
 bitflags = "2.0.0-rc.1"
 downcast-rs = "1.2.0"
 slotmap = "1.0.6"
+rustc-hash = "1.1.0"
 thiserror = "1.0.38"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"

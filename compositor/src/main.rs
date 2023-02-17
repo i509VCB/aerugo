@@ -4,7 +4,7 @@ use backend::Backend;
 use calloop::{generic::Generic, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 use clap::Parser;
 use cli::AerugoArgs;
-use shell::Graph;
+use shell::Scene;
 use smithay::{
     input::SeatState,
     reexports::calloop::EventLoop,
@@ -107,7 +107,7 @@ pub struct AerugoCompositor {
     wl_compositor: CompositorState,
     xdg_shell: XdgShellState,
     seat_state: SeatState<Self>,
-    shell: Graph,
+    scene: Scene,
     backend: Box<dyn Backend>,
 }
 
@@ -125,7 +125,7 @@ impl AerugoCompositor {
             wl_compositor,
             xdg_shell,
             seat_state,
-            shell: Graph::default(),
+            scene: Scene::default(),
             backend,
         }
     }

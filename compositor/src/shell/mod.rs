@@ -1,13 +1,8 @@
-use std::{
-    borrow::Borrow,
-    collections::{hash_map::Entry, HashMap},
-};
+use std::{borrow::Borrow, collections::hash_map::Entry};
 
+use rustc_hash::FxHashMap;
 use slotmap::{new_key_type, SlotMap};
-use smithay::{
-    output::Output,
-    utils::{Physical, Point},
-};
+use smithay::utils::{Physical, Point};
 use wayland_server::{backend::ObjectId, protocol::wl_surface, Resource};
 
 mod xdg_shell;
@@ -34,25 +29,22 @@ If the clients fail to commit the previous transaction states, should the WM's n
 client state, and cancel the previous transaction?
 */
 #[derive(Debug, Default)]
-pub struct Graph {
+pub struct Scene {
     /// Storage of all surface nodes.
     ///
     /// A SlotMap is used for stable indices.
     surfaces: SlotMap<SurfaceIndex, SurfaceNode>,
 
     /// Mapping from surface (object id) to a node.
-    surface_to_node: HashMap<ObjectId, SurfaceIndex, ahash::RandomState>,
+    surface_to_node: FxHashMap<ObjectId, SurfaceIndex>,
 
-    /// Storage of all surface nodes.
+    /// Storage of all graph nodes.
     ///
     /// A SlotMap is used for stable indices.
     graphs: SlotMap<GraphIndex, GraphNode>,
-
-    /// Outputs which have a bound node.
-    outputs: HashMap<Output, OutputInfo>,
 }
 
-impl Graph {
+impl Scene {
     pub fn commit(&mut self, surface: &wl_surface::WlSurface) {
         // If the surface is not known, create a node for the surface.
         let entry = self.surface_to_node.entry(surface.id());
@@ -60,8 +52,8 @@ impl Graph {
             let index = self.surfaces.insert_with_key(|index| SurfaceNode {
                 index,
                 surface: surface.clone(),
-                parent: None,
-                children: Vec::new(),
+                offset: Point::default(),
+                relations: NodeRelations::default(),
             });
 
             index
@@ -71,59 +63,58 @@ impl Graph {
     }
 
     pub fn surface_destroyed(&mut self, surface: &wl_surface::WlSurface) {
-        if let Entry::Occupied(entry) = self.surface_to_node.entry(surface.id()) {
-            let index = entry.remove();
-            let node = self.surfaces.remove(index).unwrap();
+        let Entry::Occupied(entry) = self.surface_to_node.entry(surface.id()) else {
+            return;
+        };
 
-            // Remove the node from it's parents and children
-            if let Some(parent) = node.parent {
-                match parent {
-                    NodeIndex::Surface(parent) => {
-                        if let Some(parent) = self.surfaces.get_mut(parent) {
-                            parent.children.retain(|node| node.index == index);
-                        }
-                    }
+        let index = entry.remove();
+        let _node = self.surfaces.remove(index).unwrap();
 
-                    NodeIndex::Graph(parent) => {
-                        if let Some(parent) = self.graphs.get_mut(parent) {
-                            parent.children.retain(
-                                // bizzare rustfmt output...
-                                |&ChildNode {
-                                     index: parent_index, ..
-                                 }| { parent_index != NodeIndex::Surface(index) },
-                            );
-                        }
-                    }
-                }
-            }
-
-            for child in node.children.iter() {
-                if let Some(child) = self.surfaces.get_mut(child.index) {
-                    child.parent.take();
-                }
-            }
-        }
+        todo!("graph rearrangement")
     }
 
-    // TODO: map_output
+    pub fn create_graph_node(&mut self) -> &mut GraphNode {
+        let index = self.graphs.insert_with_key(|index| GraphNode {
+            index,
+            offset: Point::default(),
+            relations: NodeRelations::default(),
+        });
 
-    /// Outputs mapped in the shell.
-    pub fn outputs(&self) -> impl ExactSizeIterator<Item = &Output> {
-        self.outputs.keys()
+        self.get_graph_mut(index).expect("impossible to reach: just created")
     }
 
-    // TODO: unmap_output
+    pub fn destroy_graph_node(&mut self, index: GraphIndex) {
+        let Some(_node) = self.graphs.remove(index) else {
+            return
+        };
 
-    // TODO: Traverse nodes mapped in an output.
+        todo!("graph rearrangement")
+    }
 
-    pub fn get_surface(&self, surface: &wl_surface::WlSurface) -> Option<&SurfaceNode> {
+    pub fn get_with_surface(&self, surface: &wl_surface::WlSurface) -> Option<&SurfaceNode> {
         let index = self.surface_to_node.get(&surface.id())?;
-        self.surfaces.get(*index)
+        self.get_surface(*index)
     }
 
-    pub fn get_surface_mut(&mut self, surface: &wl_surface::WlSurface) -> Option<&mut SurfaceNode> {
+    pub fn get_with_surface_mut(&mut self, surface: &wl_surface::WlSurface) -> Option<&mut SurfaceNode> {
         let index = self.surface_to_node.get(&surface.id())?;
-        self.surfaces.get_mut(*index)
+        self.get_surface_mut(*index)
+    }
+
+    pub fn get_surface(&self, index: SurfaceIndex) -> Option<&SurfaceNode> {
+        self.surfaces.get(index)
+    }
+
+    pub fn get_surface_mut(&mut self, index: SurfaceIndex) -> Option<&mut SurfaceNode> {
+        self.surfaces.get_mut(index)
+    }
+
+    pub fn get_graph(&self, index: GraphIndex) -> Option<&GraphNode> {
+        self.graphs.get(index)
+    }
+
+    pub fn get_graph_mut(&mut self, index: GraphIndex) -> Option<&mut GraphNode> {
+        self.graphs.get_mut(index)
     }
 }
 
@@ -163,16 +154,10 @@ pub struct SurfaceNode {
 
     surface: wl_surface::WlSurface,
 
-    /// The parent node of this surface.
-    parent: Option<NodeIndex>,
+    /// Offset of this surface relative to a parent.
+    offset: Point<i32, Physical>,
 
-    /// Subsurface children of this surface.
-    ///
-    /// A surface can only have subsurfaces as children.
-    ///
-    /// Although wl_surface already provides a way to get the subsurfaces, the indices of the subsurfaces
-    /// are tracked to allow quickly building a graph.
-    children: Vec<ChildNode<SurfaceIndex>>,
+    relations: NodeRelations<NodeIndex, NodeIndex, SurfaceIndex>,
 }
 
 impl SurfaceNode {
@@ -181,6 +166,10 @@ impl SurfaceNode {
     /// This may be used to reference this surface in other nodes, such as a graph node.
     pub fn index(&self) -> SurfaceIndex {
         self.index
+    }
+
+    pub fn offset(&self) -> Point<i32, Physical> {
+        self.offset
     }
 
     /// The underlying `wl_surface` of this node.
@@ -199,11 +188,10 @@ impl Borrow<SurfaceIndex> for SurfaceNode {
 pub struct GraphNode {
     index: GraphIndex,
 
-    /// A graph can only have another graph as it's parent.
-    parent: Option<GraphIndex>,
+    /// Offset of this surface relative to a parent.
+    offset: Point<i32, Physical>,
 
-    /// Children of this graph.
-    children: Vec<ChildNode<NodeIndex>>,
+    relations: NodeRelations<GraphIndex, NodeIndex, NodeIndex>,
 }
 
 impl GraphNode {
@@ -212,6 +200,10 @@ impl GraphNode {
     /// This may be used to reference this graph in other graph nodes or as the graph to be presented.
     pub fn index(&self) -> GraphIndex {
         self.index
+    }
+
+    pub fn offset(&self) -> Point<i32, Physical> {
+        self.offset
     }
 }
 
@@ -222,20 +214,37 @@ impl Borrow<GraphIndex> for GraphNode {
 }
 
 #[derive(Debug)]
-struct ChildNode<Index> {
-    index: Index,
+struct NodeRelations<Parent, Sibling, Child> {
+    /// Parent of this node.
+    parent: Option<Parent>,
 
-    /// The transform relative to the parent node.
+    /// The previous sibling of this node.
     ///
-    /// If there is no parent, then this is relative to the origin of the global coordinate space.
-    transform: Point<i32, Physical>,
+    /// If this is [`None`] but `next_sibling` is [`Some`], then this is the first child of the parent.
+    prev_sibling: Option<Sibling>,
+
+    /// The next sibling of this node.
+    ///
+    /// If this is [`None`] but `prev_sibling` is [`Some`], then this is the last child node of the parent.
+    next_sibling: Option<Sibling>,
+
+    /// First child of this node.
+    first_child: Option<Child>,
+
+    /// Last child of this node.
+    last_child: Option<Child>,
 }
 
-#[derive(Debug)]
-struct OutputInfo {
-    /// Index of the root of the graph to be presented
-    ///
-    /// This may be a single surface if in full screen, or a graph node for compositing.
-    index: NodeIndex,
-    // TODO: Damage?
+// manual implementation of Default is needed since #[derive(Default)] requires Parent, Sibling and Child to
+// also be Default.
+impl<Parent, Sibling, Child> Default for NodeRelations<Parent, Sibling, Child> {
+    fn default() -> Self {
+        Self {
+            parent: Default::default(),
+            prev_sibling: Default::default(),
+            next_sibling: Default::default(),
+            first_child: Default::default(),
+            last_child: Default::default(),
+        }
+    }
 }
