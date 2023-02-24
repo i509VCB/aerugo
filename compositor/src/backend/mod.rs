@@ -1,6 +1,6 @@
 mod x11;
 
-use std::fmt;
+use std::{error::Error, fmt};
 
 use calloop::LoopHandle;
 use downcast_rs::{impl_downcast, Downcast};
@@ -13,7 +13,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::{cli::AerugoArgs, Aerugo};
+use crate::Aerugo;
 
 pub trait Backend: fmt::Debug + Downcast {
     fn shm_state(&self) -> &ShmState;
@@ -38,13 +38,12 @@ pub trait Backend: fmt::Debug + Downcast {
 }
 impl_downcast!(Backend);
 
-pub fn create_backend(
-    r#loop: &LoopHandle<'static, Aerugo>,
-    display: &DisplayHandle,
-    args: &AerugoArgs,
-) -> Result<Box<dyn Backend>, ()> {
+pub fn default_backend(
+    r#loop: LoopHandle<'static, Aerugo>,
+    display: DisplayHandle,
+) -> Result<Box<dyn Backend>, Box<dyn Error>> {
     // TODO: X11 backend only exists right now, so the backend selection is ignored.
-    Ok(Box::new(x11::Backend::new(r#loop, display, args)?))
+    Ok(Box::new(x11::Backend::new(r#loop, display).expect("TODO: Error type")))
 }
 
 #[cfg(test)]
@@ -55,6 +54,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "Should panic if Backend is object safe, or compilation will fail")]
     fn dynamic_dispatch() {
-        let _: Box<dyn Backend> = panic!("Intentional panic");
+        let _: Box<dyn Backend> = panic!("Should panic if Backend is object safe, or compilation will fail");
     }
 }

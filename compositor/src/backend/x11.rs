@@ -17,7 +17,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::{cli::AerugoArgs, Aerugo, AerugoCompositor};
+use crate::{Aerugo, AerugoCompositor};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -33,7 +33,7 @@ pub struct Backend {
 
 impl Backend {
     // TODO: Error type
-    pub fn new(r#loop: &LoopHandle<'static, Aerugo>, display: &DisplayHandle, _args: &AerugoArgs) -> Result<Self, ()> {
+    pub fn new(r#loop: LoopHandle<'static, Aerugo>, display: DisplayHandle) -> Result<Self, ()> {
         let backend = X11Backend::new(None).unwrap();
         let x11 = backend.handle();
 
@@ -72,10 +72,10 @@ impl Backend {
         Ok(Self {
             x11,
             window,
-            r#loop: r#loop.clone(),
+            r#loop,
             display: display.clone(),
             // TODO: Additional renderer shm formats
-            shm_state: ShmState::new::<AerugoCompositor, _>(display, Vec::with_capacity(2), None),
+            shm_state: ShmState::new::<AerugoCompositor, _>(&display, Vec::with_capacity(2), None),
             shutdown: false,
             renderer,
             surface,
