@@ -22,7 +22,7 @@ features = [
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
-rev = "ffbc84e6fb6d45f10b94cdb08bcbcbcadbc7a35f"
+rev = "17db1be688145134fc4b85c35e0a394ce0efb105"
 default-features = false
 features = [
 	"backend_egl",
@@ -37,7 +37,7 @@ features = [
 ]
 
 [workspace.dependencies.wayland-backend]
-version = "0.1.0"
+version = "0.1.1"
 
 [workspace.dependencies.wayland-scanner]
 version = "0.30.0"

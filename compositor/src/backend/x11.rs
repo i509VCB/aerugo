@@ -3,12 +3,15 @@
 use calloop::LoopHandle;
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
+        allocator::{
+            dmabuf::{Dmabuf, DmabufAllocator},
+            gbm::GbmAllocator,
+        },
         egl::{EGLContext, EGLDisplay},
         renderer::{gles2::Gles2Renderer, Bind, Frame, Renderer},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface},
     },
-    reexports::gbm,
+    reexports::gbm::{self, BufferObjectFlags},
     utils::{DeviceFd, Rectangle},
     wayland::{
         dmabuf::{DmabufGlobal, DmabufState, ImportError},
@@ -34,7 +37,7 @@ pub struct Backend {
 impl Backend {
     // TODO: Error type
     pub fn new(r#loop: LoopHandle<'static, Aerugo>, display: DisplayHandle) -> Result<Self, ()> {
-        let backend = X11Backend::new(None).unwrap();
+        let backend = X11Backend::new().unwrap();
         let x11 = backend.handle();
 
         // TODO: Initialize output with window.
@@ -54,18 +57,18 @@ impl Backend {
         //   a separate function to get the DRM file descriptor in that case.
         let (_, fd) = x11.drm_node().expect("Failed to get DRM node used by X server");
         let device = gbm::Device::new(DeviceFd::from(fd)).unwrap();
-        let egl = EGLDisplay::new(device.clone(), None).unwrap();
-        let context = EGLContext::new(&egl, None).unwrap();
+        let egl = EGLDisplay::new(device.clone()).unwrap();
+        let context = EGLContext::new(&egl).unwrap();
 
         let surface = x11
             .create_surface(
                 &window,
-                device,
+                DmabufAllocator(GbmAllocator::new(device.clone(), BufferObjectFlags::RENDERING)),
                 context.dmabuf_render_formats().iter().map(|format| format.modifier),
             )
             .unwrap();
 
-        let renderer = unsafe { Gles2Renderer::new(context, None) }.unwrap();
+        let renderer = unsafe { Gles2Renderer::new(context) }.unwrap();
 
         r#loop.insert_source(backend, dispatch_x11_event).unwrap();
 
@@ -75,7 +78,7 @@ impl Backend {
             r#loop,
             display: display.clone(),
             // TODO: Additional renderer shm formats
-            shm_state: ShmState::new::<AerugoCompositor, _>(&display, Vec::with_capacity(2), None),
+            shm_state: ShmState::new::<AerugoCompositor>(&display, Vec::with_capacity(2)),
             shutdown: false,
             renderer,
             surface,

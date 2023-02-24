@@ -219,7 +219,7 @@ fn register_display_source(display: &mut Display<AerugoCompositor>, r#loop: &Loo
 }
 
 fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
-    let listening_socket = ListeningSocketSource::new_auto(None).expect("Failed to bind a socket");
+    let listening_socket = ListeningSocketSource::new_auto().expect("Failed to bind a socket");
 
     let socket = listening_socket.socket_name().to_owned();
     tracing::info!("Bound Wayland socket: {:?}", socket);
@@ -250,8 +250,8 @@ impl AerugoCompositor {
     fn new(_loop: &LoopHandle<'static, Aerugo>, display: DisplayHandle, backend: Box<dyn Backend>) -> Self {
         // Initialize common globals
         let seat_state = SeatState::new();
-        let wl_compositor = CompositorState::new::<Self, _>(&display, None);
-        let xdg_shell = XdgShellState::new::<Self, _>(&display, None);
+        let wl_compositor = CompositorState::new::<Self>(&display);
+        let xdg_shell = XdgShellState::new::<Self>(&display);
 
         Self {
             display,
