@@ -1,6 +1,13 @@
+//! The Aerugo scene graph
+//!
+//! TODO: Documentation
+
 use rustc_hash::FxHashMap;
 use slotmap::{new_key_type, SlotMap};
-use smithay::output::Output;
+use smithay::{
+    output::Output,
+    utils::{Physical, Point},
+};
 use wayland_server::{backend::ObjectId, protocol::wl_surface, Resource};
 
 new_key_type! {
@@ -40,7 +47,8 @@ pub struct SurfaceTreeNode {
     index: SurfaceTreeIndex,
     root: SurfaceIndex,
     base: SurfaceIndex,
-    // TODO: Node relations
+    relations: NodeRelations,
+    offset: Point<i32, Physical>,
 }
 
 impl SurfaceTreeNode {
@@ -68,18 +76,20 @@ impl SurfaceTreeNode {
 pub struct SurfaceNode {
     index: SurfaceIndex,
     surface: wl_surface::WlSurface,
-    // TODO: Node relations
+    relations: NodeRelations,
+    // TODO: Offset from parent?
 }
 
 #[derive(Debug)]
 pub struct BranchNode {
     index: BranchIndex,
-    // TODO: Node relations
+    relations: NodeRelations,
+    offset: Point<i32, Physical>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum NodeIndex {
-    Surface(SurfaceTreeIndex),
+    SurfaceTree(SurfaceTreeIndex),
     Branch(BranchIndex),
 }
 
@@ -107,16 +117,23 @@ impl Scene {
     }
 
     pub fn destroy_output(&mut self, output: &Output) {
-        if let Some(index) = self.output_to_node.remove(output) {
-            let node = self
-                .outputs
-                .remove(index)
-                .expect("index was tracked, so the node must also be");
+        // Disassoicating the output from child surfaces needs to occur before we destroy the node.
+        self.unset_output_root(output);
 
-            // TODO: Traverse the tree, removing the surfaces from the output?
-            // TODO: Remove this output as the parent of the node it will present.
-            todo!()
+        if let Some(index) = self.output_to_node.remove(output) {
+            let _ = self.outputs.remove(index);
         }
+    }
+
+    pub fn set_output_node(&mut self, output: &Output, node: NodeIndex) {
+        self.unset_output_root(output);
+
+        if let Some(index) = self.get_output_index(output) {
+            let output_node = self.get_output_mut(index).unwrap();
+            output_node.present = Some(node);
+        }
+
+        // TODO: Set the node and cause all child surfaces to enter the output.
     }
 
     pub fn get_output_index(&self, output: &Output) -> Option<OutputIndex> {
@@ -164,7 +181,11 @@ impl Scene {
     // TODO: Surface destroyed (for both tree and surface)
 
     pub fn create_branch(&mut self) -> &mut BranchNode {
-        let index = self.branches.insert_with_key(|index| BranchNode { index });
+        let index = self.branches.insert_with_key(|index| BranchNode {
+            index,
+            relations: NodeRelations::default(),
+            offset: (0, 0).into(),
+        });
 
         self.branches.get_mut(index).unwrap()
     }
@@ -178,40 +199,112 @@ impl Scene {
     pub fn get_branch_mut(&mut self, index: BranchIndex) -> Option<&mut BranchNode> {
         self.branches.get_mut(index)
     }
+
+    /// Sets the offset of the node relative to it's parent.
+    pub fn set_node_offset(&mut self, index: NodeIndex, offset: Point<i32, Physical>) {
+        match index {
+            NodeIndex::SurfaceTree(index) => {
+                if let Some(surface_tree) = self.get_surface_tree_mut(index) {
+                    surface_tree.offset = offset;
+                }
+            }
+
+            NodeIndex::Branch(index) => {
+                if let Some(branch) = self.get_branch_mut(index) {
+                    branch.offset = offset;
+                }
+            }
+        }
+    }
+
+    /// Raise the node one node higher relative to the parent.
+    ///
+    /// This will cause the node to farther above the parent.
+    pub fn raise_node(&mut self, index: NodeIndex) {
+        todo!()
+    }
+
+    /// Raise the node to become child node placed highest above the parent.
+    pub fn raise_node_to_top(&mut self, index: NodeIndex) {
+        todo!()
+    }
+
+    /// Lower the node one node relative to other children of it's parent.
+    ///
+    /// This will cause the node to be closer but still above the parent node.
+    pub fn lower_node(&mut self, index: NodeIndex) {
+        todo!()
+    }
+
+    /// Lower the node to be the lowest node above it's parent.
+    pub fn lower_node_to_bottom(&mut self, index: NodeIndex) {
+        todo!()
+    }
+
+    /// Unsets the node which is the output root and sends leave events.
+    fn unset_output_root(&mut self, output: &Output) {
+        if let Some(index) = self.get_output_index(output) {
+            let node = self.outputs.get_mut(index).unwrap();
+
+            if let Some(_root) = node.present {
+                // TODO: Send leave events
+            }
+        }
+    }
 }
 
-#[derive(Debug)]
-struct NodeRelations<Parent, Sibling, Child> {
+#[derive(Debug, Clone, Copy)]
+enum Index {
+    Branch(BranchIndex),
+    SurfaceTree(SurfaceTreeIndex),
+    Surface(SurfaceIndex),
+}
+
+impl From<BranchIndex> for Index {
+    fn from(value: BranchIndex) -> Self {
+        Self::Branch(value)
+    }
+}
+
+impl From<SurfaceTreeIndex> for Index {
+    fn from(value: SurfaceTreeIndex) -> Self {
+        Self::SurfaceTree(value)
+    }
+}
+
+impl From<SurfaceIndex> for Index {
+    fn from(value: SurfaceIndex) -> Self {
+        Self::Surface(value)
+    }
+}
+
+impl From<NodeIndex> for Index {
+    fn from(value: NodeIndex) -> Self {
+        match value {
+            NodeIndex::SurfaceTree(index) => index.into(),
+            NodeIndex::Branch(index) => index.into(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct NodeRelations {
     /// Parent of this node.
-    parent: Option<Parent>,
+    parent: Option<Index>,
 
     /// The previous sibling of this node.
     ///
     /// If this is [`None`] but `next_sibling` is [`Some`], then this is the first child of the parent.
-    prev_sibling: Option<Sibling>,
+    prev_sibling: Option<Index>,
 
     /// The next sibling of this node.
     ///
     /// If this is [`None`] but `prev_sibling` is [`Some`], then this is the last child node of the parent.
-    next_sibling: Option<Sibling>,
+    next_sibling: Option<Index>,
 
     /// First child of this node.
-    first_child: Option<Child>,
+    first_child: Option<Index>,
 
     /// Last child of this node.
-    last_child: Option<Child>,
-}
-
-// manual implementation of Default is needed since #[derive(Default)] requires Parent, Sibling and Child to
-// also be Default.
-impl<Parent, Sibling, Child> Default for NodeRelations<Parent, Sibling, Child> {
-    fn default() -> Self {
-        Self {
-            parent: Default::default(),
-            prev_sibling: Default::default(),
-            next_sibling: Default::default(),
-            first_child: Default::default(),
-            last_child: Default::default(),
-        }
-    }
+    last_child: Option<Index>,
 }
