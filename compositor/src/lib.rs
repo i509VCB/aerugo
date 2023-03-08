@@ -20,6 +20,7 @@ use smithay::{
 use wayland_server::{Display, DisplayHandle};
 
 pub mod backend;
+pub mod forest;
 mod scene;
 mod shell;
 mod wayland;

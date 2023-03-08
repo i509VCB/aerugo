@@ -15,6 +15,7 @@ downcast-rs = { workspace = true }
 rustc-hash = { workspace = true }
 smithay = { workspace = true }
 slotmap = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 wayland-server = { workspace = true }

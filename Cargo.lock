@@ -14,6 +14,7 @@ dependencies = [
  "rustc-hash",
  "slotmap",
  "smithay",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
  "wayland-server",

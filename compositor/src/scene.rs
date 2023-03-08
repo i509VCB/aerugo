@@ -47,7 +47,7 @@ pub struct SurfaceTreeNode {
     index: SurfaceTreeIndex,
     root: SurfaceIndex,
     base: SurfaceIndex,
-    relations: NodeRelations,
+    relations: Relation,
     offset: Point<i32, Physical>,
 }
 
@@ -76,21 +76,33 @@ impl SurfaceTreeNode {
 pub struct SurfaceNode {
     index: SurfaceIndex,
     surface: wl_surface::WlSurface,
-    relations: NodeRelations,
+    relations: Relation,
     // TODO: Offset from parent?
 }
 
 #[derive(Debug)]
 pub struct BranchNode {
     index: BranchIndex,
-    relations: NodeRelations,
+    relations: Relation,
     offset: Point<i32, Physical>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeIndex {
     SurfaceTree(SurfaceTreeIndex),
     Branch(BranchIndex),
+}
+
+impl PartialEq<SurfaceTreeIndex> for NodeIndex {
+    fn eq(&self, other: &SurfaceTreeIndex) -> bool {
+        Self::SurfaceTree(*other) == *self
+    }
+}
+
+impl PartialEq<BranchIndex> for NodeIndex {
+    fn eq(&self, other: &BranchIndex) -> bool {
+        Self::Branch(*other) == *self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -105,7 +117,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn create_output(&mut self, output: Output) -> &mut OutputNode {
+    pub fn create_output(&mut self, output: Output) -> OutputIndex {
         let index = self.outputs.insert_with_key(|index| OutputNode {
             index,
             output: output.clone(),
@@ -113,7 +125,7 @@ impl Scene {
         });
 
         self.output_to_node.insert(output, index);
-        self.outputs.get_mut(index).expect("just created")
+        index
     }
 
     pub fn destroy_output(&mut self, output: &Output) {
@@ -129,7 +141,7 @@ impl Scene {
         self.unset_output_root(output);
 
         if let Some(index) = self.get_output_index(output) {
-            let output_node = self.get_output_mut(index).unwrap();
+            let output_node = self.outputs.get_mut(index).unwrap();
             output_node.present = Some(node);
         }
 
@@ -140,14 +152,6 @@ impl Scene {
         self.output_to_node.get(output).cloned()
     }
 
-    pub fn get_output(&self, index: OutputIndex) -> Option<&OutputNode> {
-        self.outputs.get(index)
-    }
-
-    pub fn get_output_mut(&mut self, index: OutputIndex) -> Option<&mut OutputNode> {
-        self.outputs.get_mut(index)
-    }
-
     // TODO: Set node for presentation on output
 
     // TODO: Create surface tree
@@ -156,61 +160,63 @@ impl Scene {
         self.surface_tree_to_node.get(&surface.id()).cloned()
     }
 
-    pub fn get_surface_tree(&self, index: SurfaceTreeIndex) -> Option<&SurfaceTreeNode> {
-        self.surface_trees.get(index)
-    }
-
-    pub fn get_surface_tree_mut(&mut self, index: SurfaceTreeIndex) -> Option<&mut SurfaceTreeNode> {
-        self.surface_trees.get_mut(index)
-    }
-
     // TODO: Handle surface tree commit
 
     pub fn get_surface_index(&self, surface: wl_surface::WlSurface) -> Option<SurfaceIndex> {
         self.surface_to_node.get(&surface.id()).cloned()
     }
 
-    pub fn get_surface(&self, index: SurfaceIndex) -> Option<&SurfaceNode> {
-        self.surfaces.get(index)
-    }
-
-    pub fn get_surface_mut(&mut self, index: SurfaceIndex) -> Option<&mut SurfaceNode> {
-        self.surfaces.get_mut(index)
-    }
-
     // TODO: Surface destroyed (for both tree and surface)
 
-    pub fn create_branch(&mut self) -> &mut BranchNode {
-        let index = self.branches.insert_with_key(|index| BranchNode {
+    pub fn create_branch(&mut self) -> BranchIndex {
+        self.branches.insert_with_key(|index| BranchNode {
             index,
-            relations: NodeRelations::default(),
+            relations: Relation::default(),
             offset: (0, 0).into(),
-        });
-
-        self.branches.get_mut(index).unwrap()
+        })
     }
 
-    // TODO: Destroy branch
+    pub fn branch_add_child(&mut self, branch: BranchIndex, index: NodeIndex) {
+        if !self.is_node_index_valid(index) {
+            todo!()
+        }
 
-    pub fn get_branch(&self, index: BranchIndex) -> Option<&BranchNode> {
-        self.branches.get(index)
+        let Some(branch) = self.branches.get_mut(branch) else {
+            return;
+        };
+
+        // Detect if adding the child node will result in a cycle.
+        // First make sure we aren't make this branch a child of itself
+        if index == branch.index {
+            todo!()
+        }
+
+        // Next check if there is a path from the branch to the new child node.
     }
 
-    pub fn get_branch_mut(&mut self, index: BranchIndex) -> Option<&mut BranchNode> {
-        self.branches.get_mut(index)
+    pub fn destroy_branch(&mut self, index: BranchIndex) {
+        if let Some(branch) = self.branches.remove(index) {
+            let parent = branch.relations.parent;
+            let parent = parent.map(|index| match index {
+                Index::Branch(index) => index,
+                _ => unreachable!("The parent of a branch can only be a branch"),
+            });
+
+            // TODO: Unparent the child nodes
+        }
     }
 
     /// Sets the offset of the node relative to it's parent.
     pub fn set_node_offset(&mut self, index: NodeIndex, offset: Point<i32, Physical>) {
         match index {
             NodeIndex::SurfaceTree(index) => {
-                if let Some(surface_tree) = self.get_surface_tree_mut(index) {
+                if let Some(surface_tree) = self.surface_trees.get_mut(index) {
                     surface_tree.offset = offset;
                 }
             }
 
             NodeIndex::Branch(index) => {
-                if let Some(branch) = self.get_branch_mut(index) {
+                if let Some(branch) = self.branches.get_mut(index) {
                     branch.offset = offset;
                 }
             }
@@ -251,9 +257,16 @@ impl Scene {
             }
         }
     }
+
+    fn is_node_index_valid(&self, index: NodeIndex) -> bool {
+        match index {
+            NodeIndex::SurfaceTree(index) => self.surface_trees.contains_key(index),
+            NodeIndex::Branch(index) => self.branches.contains_key(index),
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Index {
     Branch(BranchIndex),
     SurfaceTree(SurfaceTreeIndex),
@@ -288,7 +301,7 @@ impl From<NodeIndex> for Index {
 }
 
 #[derive(Debug, Default)]
-struct NodeRelations {
+struct Relation {
     /// Parent of this node.
     parent: Option<Index>,
 
@@ -302,9 +315,9 @@ struct NodeRelations {
     /// If this is [`None`] but `prev_sibling` is [`Some`], then this is the last child node of the parent.
     next_sibling: Option<Index>,
 
+    /// The number of child nodes.
+    child_count: u32,
+
     /// First child of this node.
     first_child: Option<Index>,
-
-    /// Last child of this node.
-    last_child: Option<Index>,
 }
