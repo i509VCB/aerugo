@@ -259,7 +259,7 @@ impl AerugoCompositor {
             wl_compositor,
             xdg_shell,
             seat_state,
-            scene: Scene::default(),
+            scene: Scene::new(),
             backend,
         }
     }

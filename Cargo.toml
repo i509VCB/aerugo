@@ -7,7 +7,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.66"
+rust-version = "1.68"
 # license = 
 version = "0.0.1"
 authors = ["i509VCB <mail@i509.me>"]

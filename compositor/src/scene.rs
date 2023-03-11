@@ -2,26 +2,54 @@
 //!
 //! TODO: Documentation
 
+use std::ops::{Deref, DerefMut};
+
 use rustc_hash::FxHashMap;
-use slotmap::{new_key_type, SlotMap};
 use smithay::{
+    backend::renderer::{
+        element::{AsRenderElements, Element, Id, RenderElement},
+        utils::CommitCounter,
+        Renderer,
+    },
     output::Output,
-    utils::{Physical, Point},
+    utils::{Buffer, Physical, Point, Rectangle, Scale},
 };
 use wayland_server::{backend::ObjectId, protocol::wl_surface, Resource};
 
-new_key_type! {
-    /// A stable index to reference an [`OutputNode`].
-    pub struct OutputIndex;
+use crate::forest::{Error, Forest, Index};
 
-    /// A stable index to reference a [`SurfaceTreeNode`].
-    pub struct SurfaceTreeIndex;
+/// A stable index to reference an [`OutputNode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutputIndex(Index);
 
-    /// A stable index to reference a [`SurfaceNode`].
-    pub struct SurfaceIndex;
+/// A stable index to reference an [`SurfaceTreeNode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SurfaceTreeIndex(Index);
 
-    /// A stable index to reference a [`BranchNode`]
-    pub struct BranchIndex;
+/// A stable index to reference a [`SurfaceNode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SurfaceIndex(Index);
+
+/// A stable index to reference a [`BranchNode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BranchIndex(Index);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeIndex {
+    SurfaceTree(SurfaceTreeIndex),
+    Branch(BranchIndex),
+}
+
+impl PartialEq<SurfaceTreeIndex> for NodeIndex {
+    fn eq(&self, other: &SurfaceTreeIndex) -> bool {
+        Self::SurfaceTree(*other) == *self
+    }
+}
+
+impl PartialEq<BranchIndex> for NodeIndex {
+    fn eq(&self, other: &BranchIndex) -> bool {
+        Self::Branch(*other) == *self
+    }
 }
 
 #[derive(Debug)]
@@ -47,7 +75,8 @@ pub struct SurfaceTreeNode {
     index: SurfaceTreeIndex,
     root: SurfaceIndex,
     base: SurfaceIndex,
-    relations: Relation,
+    top: SurfaceIndex,
+    /// The offset of the root surface from the parent.
     offset: Point<i32, Physical>,
 }
 
@@ -70,61 +99,56 @@ impl SurfaceTreeNode {
     pub fn base(&self) -> SurfaceIndex {
         self.base
     }
+
+    /// The top surface is the subsurface at the with the highest z-index in a subsurface tree.
+    ///
+    /// If there are no subsurfaces above the root surface, then this will be the same as the root surface.
+    pub fn top(&self) -> SurfaceIndex {
+        self.top
+    }
 }
 
 #[derive(Debug)]
 pub struct SurfaceNode {
     index: SurfaceIndex,
     surface: wl_surface::WlSurface,
-    relations: Relation,
-    // TODO: Offset from parent?
+    offset: Point<i32, Physical>,
 }
 
 #[derive(Debug)]
 pub struct BranchNode {
     index: BranchIndex,
-    relations: Relation,
     offset: Point<i32, Physical>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NodeIndex {
-    SurfaceTree(SurfaceTreeIndex),
-    Branch(BranchIndex),
-}
-
-impl PartialEq<SurfaceTreeIndex> for NodeIndex {
-    fn eq(&self, other: &SurfaceTreeIndex) -> bool {
-        Self::SurfaceTree(*other) == *self
-    }
-}
-
-impl PartialEq<BranchIndex> for NodeIndex {
-    fn eq(&self, other: &BranchIndex) -> bool {
-        Self::Branch(*other) == *self
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Scene {
-    output_to_node: FxHashMap<Output, OutputIndex>,
-    outputs: SlotMap<OutputIndex, OutputNode>,
-    surface_tree_to_node: FxHashMap<ObjectId, SurfaceTreeIndex>,
-    surface_trees: SlotMap<SurfaceTreeIndex, SurfaceTreeNode>,
-    surface_to_node: FxHashMap<ObjectId, SurfaceIndex>,
-    surfaces: SlotMap<SurfaceIndex, SurfaceNode>,
-    branches: SlotMap<BranchIndex, BranchNode>,
+    outputs: FxHashMap<Output, OutputIndex>,
+    surface_trees: FxHashMap<ObjectId, SurfaceTreeIndex>,
+    surfaces: FxHashMap<ObjectId, SurfaceIndex>,
+    forest: Forest<SceneNode>,
 }
 
 impl Scene {
-    pub fn create_output(&mut self, output: Output) -> OutputIndex {
-        let index = self.outputs.insert_with_key(|index| OutputNode {
-            index,
-            output: output.clone(),
-            present: None,
-        });
+    pub fn new() -> Self {
+        Self {
+            outputs: FxHashMap::default(),
+            surface_trees: FxHashMap::default(),
+            surfaces: FxHashMap::default(),
+            forest: Forest::new(),
+        }
+    }
 
-        self.output_to_node.insert(output, index);
+    pub fn create_output(&mut self, output: Output) -> OutputIndex {
+        let index = OutputIndex(self.forest.insert_with(|index| {
+            SceneNode::Output(OutputNode {
+                index: OutputIndex(index),
+                output: output.clone(),
+                present: None,
+            })
+        }));
+
+        self.outputs.insert(output, index);
         index
     }
 
@@ -132,91 +156,131 @@ impl Scene {
         // Disassoicating the output from child surfaces needs to occur before we destroy the node.
         self.unset_output_root(output);
 
-        if let Some(index) = self.output_to_node.remove(output) {
-            let _ = self.outputs.remove(index);
+        if let Some(OutputIndex(index)) = self.outputs.remove(output) {
+            let _ = self.forest.remove(index);
         }
+    }
+
+    pub fn get_output_index(&self, output: &Output) -> Option<OutputIndex> {
+        self.outputs.get(output).cloned()
+    }
+
+    pub fn get_output(&self, index: OutputIndex) -> Option<&OutputNode> {
+        self.forest.get(index.0).map(|node| match node.deref() {
+            SceneNode::Output(node) => node,
+            _ => unreachable!(),
+        })
+    }
+
+    pub fn get_output_mut(&mut self, index: OutputIndex) -> Option<&mut OutputNode> {
+        self.forest.get_mut(index.0).map(|node| match node.deref_mut() {
+            SceneNode::Output(node) => node,
+            _ => unreachable!(),
+        })
     }
 
     pub fn set_output_node(&mut self, output: &Output, node: NodeIndex) {
         self.unset_output_root(output);
 
         if let Some(index) = self.get_output_index(output) {
-            let output_node = self.outputs.get_mut(index).unwrap();
+            let output_node = self.get_output_mut(index).unwrap();
             output_node.present = Some(node);
         }
 
-        // TODO: Set the node and cause all child surfaces to enter the output.
+        // TODO: Send enter and exit events
     }
-
-    pub fn get_output_index(&self, output: &Output) -> Option<OutputIndex> {
-        self.output_to_node.get(output).cloned()
-    }
-
-    // TODO: Set node for presentation on output
-
-    // TODO: Create surface tree
 
     pub fn get_surface_tree_index(&self, surface: wl_surface::WlSurface) -> Option<SurfaceTreeIndex> {
-        self.surface_tree_to_node.get(&surface.id()).cloned()
+        self.surface_trees.get(&surface.id()).cloned()
     }
 
-    // TODO: Handle surface tree commit
+    pub fn get_surface_tree(&mut self, index: SurfaceTreeIndex) -> Option<&mut SurfaceTreeNode> {
+        self.forest.get_mut(index.0).map(|node| match node.deref_mut() {
+            SceneNode::SurfaceTree(node) => node,
+            _ => unreachable!(),
+        })
+    }
+
+    pub fn create_surface_tree(&mut self, surface: wl_surface::WlSurface) -> SurfaceTreeIndex {
+        // Create the surface node for this surface.
+        let root = SurfaceIndex(self.forest.insert_with(|index| {
+            SceneNode::Surface(SurfaceNode {
+                index: SurfaceIndex(index),
+                surface: surface.clone(),
+                offset: Default::default(),
+            })
+        }));
+
+        let index = SurfaceTreeIndex(self.forest.insert_with(|index| {
+            SceneNode::SurfaceTree(SurfaceTreeNode {
+                index: SurfaceTreeIndex(index),
+                root,
+                base: root,
+                top: root,
+                offset: Default::default(),
+            })
+        }));
+
+        // Initialize the surface tree
+        self.apply_surface_commit(surface);
+        index
+    }
 
     pub fn get_surface_index(&self, surface: wl_surface::WlSurface) -> Option<SurfaceIndex> {
-        self.surface_to_node.get(&surface.id()).cloned()
+        self.surfaces.get(&surface.id()).cloned()
+    }
+
+    pub fn get_surface(&mut self, index: SurfaceIndex) -> Option<&mut SurfaceNode> {
+        self.forest.get_mut(index.0).map(|node| match node.deref_mut() {
+            SceneNode::Surface(node) => node,
+            _ => unreachable!(),
+        })
+    }
+
+    /// Applies the new surface state to the scene graph.
+    ///
+    /// If the surface has any subsurfaces, the subsurfaces will be adjusted.
+    pub fn apply_surface_commit(&mut self, _surface: wl_surface::WlSurface) {
+        // TODO: Do we need a commit state to apply since we are transaction based?
     }
 
     // TODO: Surface destroyed (for both tree and surface)
 
     pub fn create_branch(&mut self) -> BranchIndex {
-        self.branches.insert_with_key(|index| BranchNode {
-            index,
-            relations: Relation::default(),
-            offset: (0, 0).into(),
+        BranchIndex(self.forest.insert_with(|index| {
+            SceneNode::Branch(BranchNode {
+                index: BranchIndex(index),
+                offset: (0, 0).into(),
+            })
+        }))
+    }
+
+    pub fn get_branch(&mut self, index: BranchIndex) -> Option<&mut BranchNode> {
+        self.forest.get_mut(index.0).map(|node| match node.deref_mut() {
+            SceneNode::Branch(node) => node,
+            _ => unreachable!(),
         })
     }
 
-    pub fn branch_add_child(&mut self, branch: BranchIndex, index: NodeIndex) {
-        if !self.is_node_index_valid(index) {
-            todo!()
-        }
-
-        let Some(branch) = self.branches.get_mut(branch) else {
-            return;
-        };
-
-        // Detect if adding the child node will result in a cycle.
-        // First make sure we aren't make this branch a child of itself
-        if index == branch.index {
-            todo!()
-        }
-
-        // Next check if there is a path from the branch to the new child node.
+    pub fn branch_add_child(&mut self, branch: BranchIndex, index: NodeIndex) -> Result<(), Error> {
+        self.forest.add_child(branch.into(), index.into())
     }
 
     pub fn destroy_branch(&mut self, index: BranchIndex) {
-        if let Some(branch) = self.branches.remove(index) {
-            let parent = branch.relations.parent;
-            let parent = parent.map(|index| match index {
-                Index::Branch(index) => index,
-                _ => unreachable!("The parent of a branch can only be a branch"),
-            });
-
-            // TODO: Unparent the child nodes
-        }
+        let _ = self.forest.remove(index.into());
     }
 
     /// Sets the offset of the node relative to it's parent.
     pub fn set_node_offset(&mut self, index: NodeIndex, offset: Point<i32, Physical>) {
         match index {
             NodeIndex::SurfaceTree(index) => {
-                if let Some(surface_tree) = self.surface_trees.get_mut(index) {
+                if let Some(surface_tree) = self.get_surface_tree(index) {
                     surface_tree.offset = offset;
                 }
             }
 
             NodeIndex::Branch(index) => {
-                if let Some(branch) = self.branches.get_mut(index) {
+                if let Some(branch) = self.get_branch(index) {
                     branch.offset = offset;
                 }
             }
@@ -247,47 +311,104 @@ impl Scene {
         todo!()
     }
 
+    pub fn get_graph(&self, output: &Output) -> Option<Heirarchy<'_>> {
+        let output = self.get_output_index(output)?;
+        let output = self.get_output(output).unwrap();
+        Some(Heirarchy {
+            scene: self,
+            root: output.present?,
+        })
+    }
+
     /// Unsets the node which is the output root and sends leave events.
     fn unset_output_root(&mut self, output: &Output) {
         if let Some(index) = self.get_output_index(output) {
-            let node = self.outputs.get_mut(index).unwrap();
+            let node = self.get_output(index).unwrap();
 
             if let Some(_root) = node.present {
                 // TODO: Send leave events
             }
         }
     }
+}
 
-    fn is_node_index_valid(&self, index: NodeIndex) -> bool {
-        match index {
-            NodeIndex::SurfaceTree(index) => self.surface_trees.contains_key(index),
-            NodeIndex::Branch(index) => self.branches.contains_key(index),
-        }
+pub struct SceneGraphElement {}
+
+impl Element for SceneGraphElement {
+    fn id(&self) -> &Id {
+        todo!()
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        todo!()
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        todo!()
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        todo!()
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Index {
-    Branch(BranchIndex),
-    SurfaceTree(SurfaceTreeIndex),
-    Surface(SurfaceIndex),
+impl<R: Renderer> RenderElement<R> for SceneGraphElement {
+    fn draw<'a>(
+        &self,
+        frame: &mut R::Frame<'a>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+    ) -> Result<(), R::Error> {
+        todo!()
+    }
+}
+
+pub struct Heirarchy<'scene> {
+    scene: &'scene Scene,
+    root: NodeIndex,
+}
+
+impl<R: Renderer> AsRenderElements<R> for Heirarchy<'_> {
+    type RenderElement = SceneGraphElement;
+
+    fn render_elements<C: From<Self::RenderElement>>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> Vec<C> {
+        let Some(mut _iter) = self.scene.forest.dfs_descend(self.root.into()) else {
+            return Vec::new();
+        };
+
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+enum SceneNode {
+    Output(OutputNode),
+    SurfaceTree(SurfaceTreeNode),
+    Surface(SurfaceNode),
+    Branch(BranchNode),
 }
 
 impl From<BranchIndex> for Index {
     fn from(value: BranchIndex) -> Self {
-        Self::Branch(value)
+        value.0
     }
 }
 
 impl From<SurfaceTreeIndex> for Index {
     fn from(value: SurfaceTreeIndex) -> Self {
-        Self::SurfaceTree(value)
+        value.0
     }
 }
 
 impl From<SurfaceIndex> for Index {
     fn from(value: SurfaceIndex) -> Self {
-        Self::Surface(value)
+        value.0
     }
 }
 
@@ -298,26 +419,4 @@ impl From<NodeIndex> for Index {
             NodeIndex::Branch(index) => index.into(),
         }
     }
-}
-
-#[derive(Debug, Default)]
-struct Relation {
-    /// Parent of this node.
-    parent: Option<Index>,
-
-    /// The previous sibling of this node.
-    ///
-    /// If this is [`None`] but `next_sibling` is [`Some`], then this is the first child of the parent.
-    prev_sibling: Option<Index>,
-
-    /// The next sibling of this node.
-    ///
-    /// If this is [`None`] but `prev_sibling` is [`Some`], then this is the last child node of the parent.
-    next_sibling: Option<Index>,
-
-    /// The number of child nodes.
-    child_count: u32,
-
-    /// First child of this node.
-    first_child: Option<Index>,
 }
