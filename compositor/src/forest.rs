@@ -347,7 +347,6 @@ pub enum Edge {
 /// An pre-order depth first iterator over nodes in a [`Forest`].
 ///
 /// This iterator yields some [`Edge`].
-#[derive(Clone)]
 pub struct PreorderTraverse<'f, T> {
     forest: &'f Forest<T>,
     root: Index,
@@ -394,7 +393,16 @@ impl<T> Iterator for PreorderTraverse<'_, T> {
     }
 }
 
-#[derive(Clone)]
+impl<T> Clone for PreorderTraverse<'_, T> {
+    fn clone(&self) -> Self {
+        Self {
+            forest: self.forest,
+            root: self.root,
+            next: self.next,
+        }
+    }
+}
+
 pub struct DfsDescend<'f, T>(PreorderTraverse<'f, T>);
 
 impl<T> Iterator for DfsDescend<'_, T> {
@@ -408,6 +416,12 @@ impl<T> Iterator for DfsDescend<'_, T> {
                 Edge::End(_) => None,
             }
         })
+    }
+}
+
+impl<T> Clone for DfsDescend<'_, T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 

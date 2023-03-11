@@ -7,12 +7,13 @@ use std::ops::{Deref, DerefMut};
 use rustc_hash::FxHashMap;
 use smithay::{
     backend::renderer::{
-        element::{AsRenderElements, Element, Id, RenderElement},
-        utils::CommitCounter,
+        element::{AsRenderElements, Element, Id, RenderElement, UnderlyingStorage},
+        utils::{CommitCounter, RendererSurfaceStateUserData},
         Renderer,
     },
     output::Output,
     utils::{Buffer, Physical, Point, Rectangle, Scale},
+    wayland::compositor,
 };
 use wayland_server::{backend::ObjectId, protocol::wl_surface, Resource};
 
@@ -332,22 +333,31 @@ impl Scene {
     }
 }
 
-pub struct SceneGraphElement {}
+pub struct SceneGraphElement {
+    id: Id,
+    surface: wl_surface::WlSurface,
+}
+
+impl SceneGraphElement {}
 
 impl Element for SceneGraphElement {
     fn id(&self) -> &Id {
-        todo!()
+        &self.id
     }
 
     fn current_commit(&self) -> CommitCounter {
-        todo!()
+        compositor::with_states(&self.surface, |states| {
+            let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            data.map(|d| d.borrow().current_commit())
+        })
+        .unwrap_or_default()
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
         todo!()
     }
 
-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
         todo!()
     }
 }
@@ -361,6 +371,14 @@ impl<R: Renderer> RenderElement<R> for SceneGraphElement {
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
         todo!()
+    }
+
+    fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage> {
+        compositor::with_states(&self.surface, |states| {
+            let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            data.and_then(|d| d.borrow().buffer().cloned())
+                .map(UnderlyingStorage::Wayland)
+        })
     }
 }
 
@@ -378,11 +396,57 @@ impl<R: Renderer> AsRenderElements<R> for Heirarchy<'_> {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
     ) -> Vec<C> {
-        let Some(mut _iter) = self.scene.forest.dfs_descend(self.root.into()) else {
+        let Some(iter) = self.scene.forest.dfs_descend(self.root.into()) else {
             return Vec::new();
         };
 
-        todo!()
+        // Determine the final offset of the indices because smithay expects the render elements top to bottom.
+        let final_offset: Point<i32, Physical> = iter.clone().fold((0, 0).into(), |mut offset, index| {
+            match self.scene.forest.get(index).unwrap().deref() {
+                SceneNode::Output(_) => unreachable!(),
+                SceneNode::SurfaceTree(node) => offset += node.offset,
+                SceneNode::Surface(node) => offset += node.offset,
+                SceneNode::Branch(node) => offset += node.offset,
+            }
+
+            offset
+        });
+
+        // Collect all the surfaces, subtracting from the final offset to get the expected offset.
+        let indices = iter.collect::<Vec<_>>();
+
+        let mut offset = final_offset;
+        indices
+            .iter()
+            .rev()
+            .filter_map(|&index| {
+                let node = self.scene.forest.get(index)?;
+
+                match node.deref() {
+                    SceneNode::Output(_) => unreachable!(),
+                    SceneNode::SurfaceTree(node) => {
+                        offset -= node.offset;
+                        None
+                    }
+
+                    SceneNode::Surface(node) => {
+                        let elem = SceneGraphElement {
+                            id: Id::from_wayland_resource(&node.surface),
+                            surface: node.surface.clone(),
+                        };
+
+                        offset -= node.offset;
+                        Some(elem)
+                    }
+
+                    SceneNode::Branch(node) => {
+                        offset -= node.offset;
+                        None
+                    }
+                }
+            })
+            .map(C::from)
+            .collect()
     }
 }
 
