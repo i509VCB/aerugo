@@ -5,7 +5,7 @@ use smithay::{
 };
 use wayland_server::protocol::{wl_output, wl_seat, wl_surface};
 
-use crate::AerugoCompositor;
+use crate::{scene::NodeIndex, AerugoCompositor};
 
 impl XdgShellHandler for AerugoCompositor {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -15,6 +15,9 @@ impl XdgShellHandler for AerugoCompositor {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // TODO: Remove this horrible temporary thing.
         surface.send_configure();
+        let index = self.scene.create_surface_tree(surface.wl_surface().clone());
+        self.scene.set_output_node(&self.output, NodeIndex::SurfaceTree(index));
+        dbg!(index);
     }
 
     fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {

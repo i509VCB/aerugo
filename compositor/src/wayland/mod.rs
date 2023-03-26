@@ -7,5 +7,6 @@
 
 mod buffer;
 mod compositor;
+mod output;
 mod seat;
 mod xdg_shell;

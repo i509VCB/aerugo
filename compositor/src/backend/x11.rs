@@ -8,11 +8,15 @@ use smithay::{
             gbm::GbmAllocator,
         },
         egl::{EGLContext, EGLDisplay},
-        renderer::{gles2::Gles2Renderer, Bind, Frame, Renderer},
+        renderer::{
+            element::{AsRenderElements, RenderElement},
+            gles2::Gles2Renderer,
+            Bind, Frame, Renderer,
+        },
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface},
     },
     reexports::gbm::{self, BufferObjectFlags},
-    utils::{DeviceFd, Rectangle},
+    utils::{DeviceFd, Rectangle, Transform},
     wayland::{
         dmabuf::{DmabufGlobal, DmabufState, ImportError},
         shm::ShmState,
@@ -20,7 +24,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::{Aerugo, AerugoCompositor};
+use crate::{scene::SceneGraphElement, Aerugo, AerugoCompositor};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -87,22 +91,29 @@ impl Backend {
 }
 
 fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
-    fn get_backend(compositor: &mut AerugoCompositor) -> &mut Backend {
-        compositor.backend.downcast_mut().unwrap()
-    }
-
     match event {
         X11Event::Refresh { window_id: _ } => {
-            let backend = get_backend(&mut aerugo.comp);
+            let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
             let (buffer, _age) = backend.surface.buffer().unwrap();
             backend.renderer.bind(buffer).unwrap();
+
+            let elems: Vec<SceneGraphElement> = if let Some(hir) = aerugo.comp.scene.get_graph(&aerugo.comp.output) {
+                hir.render_elements(
+                    &mut backend.renderer,
+                    (0, 0).into(),
+                    smithay::utils::Scale { x: 1., y: 1. },
+                )
+                .into()
+            } else {
+                Vec::new()
+            };
 
             {
                 let mut frame = backend
                     .renderer
                     .render(
                         (backend.window.size().w as i32, backend.window.size().h as i32).into(),
-                        smithay::utils::Transform::Normal,
+                        Transform::Normal,
                     )
                     .unwrap();
 
@@ -116,7 +127,25 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
                     )
                     .unwrap();
 
-                // TODO: Actual rendering lol
+                for elem in elems {
+                    RenderElement::<Gles2Renderer>::draw(
+                        &elem,
+                        &mut frame,
+                        Rectangle::from_loc_and_size(
+                            (0., 0.),
+                            (backend.window.size().w as f64, backend.window.size().h as f64),
+                        ),
+                        Rectangle::from_loc_and_size(
+                            (0, 0),
+                            (backend.window.size().w as i32, backend.window.size().h as i32),
+                        ),
+                        &[Rectangle::from_loc_and_size(
+                            (0, 0),
+                            (backend.window.size().w as i32, backend.window.size().h as i32),
+                        )],
+                    )
+                    .expect("Error when rendering");
+                }
 
                 frame.finish().unwrap();
             }
@@ -128,10 +157,12 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
             new_size: _,
             window_id: _,
         } => {}
-        X11Event::PresentCompleted { window_id: _ } => {}
+        X11Event::PresentCompleted { window_id: _ } => {
+            let _backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
+        }
         X11Event::CloseRequested { window_id: _ } => {
             // TODO: shutdown based on output counts
-            let backend = get_backend(&mut aerugo.comp);
+            let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
             backend.shutdown = true;
             aerugo.check_shutdown();
         }

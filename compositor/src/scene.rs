@@ -9,10 +9,10 @@ use smithay::{
     backend::renderer::{
         element::{AsRenderElements, Element, Id, RenderElement, UnderlyingStorage},
         utils::{CommitCounter, RendererSurfaceStateUserData},
-        Renderer,
+        Renderer, Frame, ImportAll,
     },
     output::Output,
-    utils::{Buffer, Physical, Point, Rectangle, Scale},
+    utils::{Buffer, Physical, Point, Rectangle, Scale, Transform},
     wayland::compositor,
 };
 use wayland_server::{backend::ObjectId, protocol::wl_surface, Resource};
@@ -154,7 +154,7 @@ impl Scene {
     }
 
     pub fn destroy_output(&mut self, output: &Output) {
-        // Disassoicating the output from child surfaces needs to occur before we destroy the node.
+        // Disassociating the output from child surfaces needs to occur before we destroy the node.
         self.unset_output_root(output);
 
         if let Some(OutputIndex(index)) = self.outputs.remove(output) {
@@ -222,8 +222,10 @@ impl Scene {
             })
         }));
 
+        self.forest.add_child(index.0, root.0).unwrap();
+
         // Initialize the surface tree
-        self.apply_surface_commit(surface);
+        self.apply_surface_commit(&surface);
         index
     }
 
@@ -241,7 +243,7 @@ impl Scene {
     /// Applies the new surface state to the scene graph.
     ///
     /// If the surface has any subsurfaces, the subsurfaces will be adjusted.
-    pub fn apply_surface_commit(&mut self, _surface: wl_surface::WlSurface) {
+    pub fn apply_surface_commit(&mut self, _surface: &wl_surface::WlSurface) {
         // TODO: Do we need a commit state to apply since we are transaction based?
     }
 
@@ -312,10 +314,10 @@ impl Scene {
         todo!()
     }
 
-    pub fn get_graph(&self, output: &Output) -> Option<Heirarchy<'_>> {
+    pub fn get_graph(&self, output: &Output) -> Option<Hierarchy<'_>> {
         let output = self.get_output_index(output)?;
         let output = self.get_output(output).unwrap();
-        Some(Heirarchy {
+        Some(Hierarchy {
             scene: self,
             root: output.present?,
         })
@@ -362,7 +364,10 @@ impl Element for SceneGraphElement {
     }
 }
 
-impl<R: Renderer> RenderElement<R> for SceneGraphElement {
+impl<R: Renderer + ImportAll> RenderElement<R> for SceneGraphElement
+where
+    R::TextureId: 'static,
+{
     fn draw<'a>(
         &self,
         frame: &mut R::Frame<'a>,
@@ -370,7 +375,22 @@ impl<R: Renderer> RenderElement<R> for SceneGraphElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
-        todo!()
+        compositor::with_states(&self.surface, |states| {
+            let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            if let Some(data) = data {
+                let data = data.borrow();
+
+                if let Some(texture) = data.texture::<R>(frame.id()) {
+                    // TODO: data.buffer_transform is private
+                    frame.render_texture_from_to(texture, src, dst, damage, Transform::Normal, 1.0f32)?;
+                } else {
+                    dbg!("Not available");
+                    // warn!("trying to render texture from different renderer");
+                }
+            }
+
+            Ok(())
+        })
     }
 
     fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage> {
@@ -382,12 +402,15 @@ impl<R: Renderer> RenderElement<R> for SceneGraphElement {
     }
 }
 
-pub struct Heirarchy<'scene> {
+pub struct Hierarchy<'scene> {
     scene: &'scene Scene,
     root: NodeIndex,
 }
 
-impl<R: Renderer> AsRenderElements<R> for Heirarchy<'_> {
+impl<R: Renderer + ImportAll> AsRenderElements<R> for Hierarchy<'_>
+where
+    R::TextureId: 'static,
+{
     type RenderElement = SceneGraphElement;
 
     fn render_elements<C: From<Self::RenderElement>>(
@@ -430,6 +453,10 @@ impl<R: Renderer> AsRenderElements<R> for Heirarchy<'_> {
                     }
 
                     SceneNode::Surface(node) => {
+                        compositor::with_states(&node.surface, |states| {
+                            smithay::backend::renderer::utils::import_surface(renderer, states).expect("Failed to import");
+                        });
+
                         let elem = SceneGraphElement {
                             id: Id::from_wayland_resource(&node.surface),
                             surface: node.surface.clone(),

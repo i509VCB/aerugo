@@ -12,9 +12,10 @@ use std::{
 use calloop::{channel::SyncSender, generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 
 use backend::Backend;
-use scene::Scene;
+use scene::{OutputIndex, Scene};
 use smithay::{
     input::SeatState,
+    output::{Output, PhysicalProperties},
     wayland::{compositor::CompositorState, shell::xdg::XdgShellState, socket::ListeningSocketSource},
 };
 use wayland_server::{Display, DisplayHandle};
@@ -244,6 +245,9 @@ pub struct AerugoCompositor {
     xdg_shell: XdgShellState,
     seat_state: SeatState<Self>,
     scene: Scene,
+    // This is not what I want in the future, but is for testing.
+    output: Output,
+    output_index: OutputIndex,
     backend: Box<dyn Backend>,
 }
 
@@ -253,13 +257,28 @@ impl AerugoCompositor {
         let seat_state = SeatState::new();
         let wl_compositor = CompositorState::new::<Self>(&display);
         let xdg_shell = XdgShellState::new::<Self>(&display);
+        let output = Output::new(
+            "Test output".into(),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: String::new(),
+                model: String::new(),
+            },
+        );
+        output.create_global::<Self>(&display);
+
+        let mut scene = Scene::new();
+        let output_index = scene.create_output(output.clone());
 
         Self {
             display,
             wl_compositor,
             xdg_shell,
             seat_state,
-            scene: Scene::new(),
+            scene,
+            output,
+            output_index,
             backend,
         }
     }

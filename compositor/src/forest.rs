@@ -253,10 +253,12 @@ impl<T> Forest<T> {
             return Err(Error::Cycle);
         }
 
-        // TODO: This is not yet done
-        // TODO: How to handle a node with siblings
+        // 4. Make sure the node being inserted does not appear in the parent's child hierarchy
+        if self.dfs_descend(index).unwrap().any(|index| index == inserting) {
+            return Err(Error::Cycle);
+        }
 
-        // 4. The node being inserted must have some sort of relationship,
+        // 5. TODO: Make sure the node being inserted does not appear in the parent's parents and siblings.
 
         Ok(())
     }

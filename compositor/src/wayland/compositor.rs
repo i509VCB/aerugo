@@ -17,7 +17,7 @@ impl CompositorHandler for AerugoCompositor {
 
         // Allow smithay to import buffers for us
 
-        //self.scene.commit(surface);
+        self.scene.apply_surface_commit(surface);
     }
 }
 
