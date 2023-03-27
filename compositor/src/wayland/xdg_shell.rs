@@ -1,27 +1,29 @@
 use smithay::{
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point, Serial},
-    wayland::shell::xdg::{Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState},
+    wayland::shell::xdg::{
+        Configure, PopupSurface, PositionerState, ShellClient, ToplevelSurface, XdgShellHandler, XdgShellState,
+    },
 };
 use wayland_server::protocol::{wl_output, wl_seat, wl_surface};
 
-use crate::{scene::NodeIndex, AerugoCompositor};
+use crate::AerugoCompositor;
 
 impl XdgShellHandler for AerugoCompositor {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell
     }
 
+    fn new_client(&mut self, _client: ShellClient) {}
+
+    fn client_pong(&mut self, _client: ShellClient) {}
+
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        // TODO: Remove this horrible temporary thing.
-        surface.send_configure();
-        let index = self.scene.create_surface_tree(surface.wl_surface().clone());
-        self.scene.set_output_node(&self.output, NodeIndex::SurfaceTree(index));
-        dbg!(index);
+        self.shell.pending_toplevels.push(surface);
     }
 
     fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {
-        // TODO: track popup
+        // TODO: track popups
     }
 
     fn move_request(&mut self, _surface: ToplevelSurface, _seat: wl_seat::WlSeat, _serial: Serial) {

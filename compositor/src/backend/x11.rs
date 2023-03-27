@@ -11,6 +11,7 @@ use smithay::{
         renderer::{
             element::{AsRenderElements, RenderElement},
             gles2::Gles2Renderer,
+            utils::draw_render_elements,
             Bind, Frame, Renderer,
         },
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface},
@@ -92,74 +93,13 @@ impl Backend {
 
 fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
     match event {
-        X11Event::Refresh { window_id: _ } => {
-            let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
-            let (buffer, _age) = backend.surface.buffer().unwrap();
-            backend.renderer.bind(buffer).unwrap();
-
-            let elems: Vec<SceneGraphElement> = if let Some(hir) = aerugo.comp.scene.get_graph(&aerugo.comp.output) {
-                hir.render_elements(
-                    &mut backend.renderer,
-                    (0, 0).into(),
-                    smithay::utils::Scale { x: 1., y: 1. },
-                )
-                .into()
-            } else {
-                Vec::new()
-            };
-
-            {
-                let mut frame = backend
-                    .renderer
-                    .render(
-                        (backend.window.size().w as i32, backend.window.size().h as i32).into(),
-                        Transform::Normal,
-                    )
-                    .unwrap();
-
-                frame
-                    .clear(
-                        [0.8, 0.8, 0.8, 1.0],
-                        &[Rectangle::from_loc_and_size(
-                            (0, 0),
-                            (backend.window.size().w as i32, backend.window.size().h as i32),
-                        )],
-                    )
-                    .unwrap();
-
-                for elem in elems {
-                    RenderElement::<Gles2Renderer>::draw(
-                        &elem,
-                        &mut frame,
-                        Rectangle::from_loc_and_size(
-                            (0., 0.),
-                            (backend.window.size().w as f64, backend.window.size().h as f64),
-                        ),
-                        Rectangle::from_loc_and_size(
-                            (0, 0),
-                            (backend.window.size().w as i32, backend.window.size().h as i32),
-                        ),
-                        &[Rectangle::from_loc_and_size(
-                            (0, 0),
-                            (backend.window.size().w as i32, backend.window.size().h as i32),
-                        )],
-                    )
-                    .expect("Error when rendering");
-                }
-
-                frame.finish().unwrap();
-            }
-
-            backend.surface.submit().unwrap();
-        }
+        X11Event::Refresh { window_id: _ } => draw(aerugo),
         X11Event::Input(_) => {}
         X11Event::Resized {
             new_size: _,
             window_id: _,
-        } => {}
-        X11Event::PresentCompleted { window_id: _ } => {
-            let _backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
-        }
+        } => draw(aerugo),
+        X11Event::PresentCompleted { window_id: _ } => draw(aerugo),
         X11Event::CloseRequested { window_id: _ } => {
             // TODO: shutdown based on output counts
             let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
@@ -167,6 +107,55 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
             aerugo.check_shutdown();
         }
     }
+}
+
+fn draw(aerugo: &mut Aerugo) {
+    let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
+    let (buffer, _age) = backend.surface.buffer().unwrap();
+    backend.renderer.bind(buffer).unwrap();
+
+    let elems: Vec<SceneGraphElement> = if let Some(hir) = aerugo.comp.scene.get_graph(&aerugo.comp.output) {
+        hir.render_elements(
+            &mut backend.renderer,
+            (0, 0).into(),
+            smithay::utils::Scale { x: 1., y: 1. },
+        )
+        .into()
+    } else {
+        Vec::new()
+    };
+
+    {
+        let mut frame = backend
+            .renderer
+            .render(
+                (backend.window.size().w as i32, backend.window.size().h as i32).into(),
+                Transform::Normal,
+            )
+            .unwrap();
+
+        frame
+            .clear(
+                [0.8, 0.8, 0.8, 1.0],
+                &[Rectangle::from_loc_and_size(
+                    (0, 0),
+                    (backend.window.size().w as i32, backend.window.size().h as i32),
+                )],
+            )
+            .unwrap();
+
+        draw_render_elements::<Gles2Renderer, _, _>(
+            &mut frame,
+            1.0,
+            &elems,
+            &[Rectangle::from_loc_and_size((0, 0), (i32::MAX, i32::MAX))],
+        )
+        .unwrap();
+
+        frame.finish().unwrap();
+    }
+
+    backend.surface.submit().unwrap();
 }
 
 impl crate::backend::Backend for Backend {

@@ -9,7 +9,7 @@ use smithay::{
     backend::renderer::{
         element::{AsRenderElements, Element, Id, RenderElement, UnderlyingStorage},
         utils::{CommitCounter, RendererSurfaceStateUserData},
-        Renderer, Frame, ImportAll,
+        Frame, ImportAll, Renderer,
     },
     output::Output,
     utils::{Buffer, Physical, Point, Rectangle, Scale, Transform},
@@ -356,11 +356,40 @@ impl Element for SceneGraphElement {
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
-        todo!()
+        compositor::with_states(&self.surface, |states| {
+            let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            if let Some(data) = data {
+                let data = data.borrow();
+
+                if let Some(view) = data.view() {
+                    Some(view.src.to_buffer(
+                        // TODO: Do not hardcode these
+                        1.0,
+                        Transform::Normal,
+                        &data.buffer_size().unwrap().to_f64(),
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
     }
 
     fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        todo!()
+        let size = compositor::with_states(&self.surface, |states| {
+            let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            data.and_then(|d| d.borrow().view()).map(|surface_view| {
+                (surface_view.dst.to_f64().to_physical(1.0).to_point())
+                    .to_i32_round()
+                    .to_size()
+            })
+        })
+        .unwrap_or_default();
+
+        Rectangle::from_loc_and_size((0, 0), size)
     }
 }
 
@@ -453,9 +482,8 @@ where
                     }
 
                     SceneNode::Surface(node) => {
-                        compositor::with_states(&node.surface, |states| {
-                            smithay::backend::renderer::utils::import_surface(renderer, states).expect("Failed to import");
-                        });
+                        smithay::backend::renderer::utils::import_surface_tree(renderer, &node.surface)
+                            .expect("Failed to import");
 
                         let elem = SceneGraphElement {
                             id: Id::from_wayland_resource(&node.surface),

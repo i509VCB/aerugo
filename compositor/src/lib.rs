@@ -12,7 +12,8 @@ use std::{
 use calloop::{channel::SyncSender, generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 
 use backend::Backend;
-use scene::{OutputIndex, Scene};
+use scene::Scene;
+use shell::Shell;
 use smithay::{
     input::SeatState,
     output::{Output, PhysicalProperties},
@@ -244,10 +245,10 @@ pub struct AerugoCompositor {
     wl_compositor: CompositorState,
     xdg_shell: XdgShellState,
     seat_state: SeatState<Self>,
+    shell: Shell,
     scene: Scene,
     // This is not what I want in the future, but is for testing.
     output: Output,
-    output_index: OutputIndex,
     backend: Box<dyn Backend>,
 }
 
@@ -269,16 +270,18 @@ impl AerugoCompositor {
         output.create_global::<Self>(&display);
 
         let mut scene = Scene::new();
-        let output_index = scene.create_output(output.clone());
+        scene.create_output(output.clone());
+
+        let shell = Shell::new();
 
         Self {
             display,
             wl_compositor,
             xdg_shell,
             seat_state,
+            shell,
             scene,
             output,
-            output_index,
             backend,
         }
     }
