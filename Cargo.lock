@@ -17,6 +17,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+ "wayland-scanner",
  "wayland-server",
 ]
 

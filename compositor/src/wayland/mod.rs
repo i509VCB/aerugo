@@ -5,8 +5,7 @@
 //! Some protocols are not included in this module. Notably `wl_shm` and `zwp_linux_dmabuf_v1` since these two
 //! protocols require deeper integration with the backend.
 
-mod buffer;
-mod compositor;
-mod output;
-mod seat;
+mod core;
+mod ext;
+
 mod xdg_shell;

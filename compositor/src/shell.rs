@@ -26,7 +26,6 @@ use std::num::NonZeroU64;
 
 use rustc_hash::FxHashMap;
 use smithay::{
-    backend::renderer::utils::Buffer,
     utils::{Logical, Serial, Size},
     wayland::shell::xdg::ToplevelSurface,
     xwayland::X11Surface,
@@ -44,6 +43,7 @@ pub enum Surface {
 pub struct ToplevelState {
     surface: Surface,
 
+    // TODO: Attached texture.
     /// Acknowledged state of the toplevel.
     ///
     /// [`None`] if the state of the toplevel has not been acknowledged yet.
@@ -110,5 +110,24 @@ impl Shell {
         }
 
         // TODO: Check if the surface is a toplevel and ack the state.
+        //
+        // TODO: Could store id in surface state and lookup id vs worst case O(1) list lookup
+        let state = self
+            .toplevels
+            .values_mut()
+            .find(|state| match &state.surface {
+                Surface::Toplevel(toplevel) => surface == toplevel.wl_surface(),
+                Surface::XWayland(xwayland) => Some(surface) == xwayland.wl_surface().as_ref(),
+            })
+            .unwrap();
+
+        match &state.surface {
+            Surface::Toplevel(_toplevel) => {
+                // TODO: Check for open transactions on this?
+                //
+            }
+
+            Surface::XWayland(_) => todo!(),
+        }
     }
 }
