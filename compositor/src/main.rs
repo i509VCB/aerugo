@@ -17,8 +17,8 @@ fn main() {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    let configuation = Configuration::new(backend::default_backend);
-    let executor = configuation.create_server().expect("Failed to create server");
+    let configuration = Configuration::new(backend::default_backend);
+    let executor = configuration.create_server().expect("Failed to create server");
 
     if let Err(err) = executor.join() {
         panic::resume_unwind(err)

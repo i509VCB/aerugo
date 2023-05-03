@@ -20,6 +20,7 @@ use smithay::{
     output::{Output, PhysicalProperties},
     wayland::{compositor::CompositorState, shell::xdg::XdgShellState, socket::ListeningSocketSource},
 };
+use wayland::protocols::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
 use wayland_server::{
     backend::{ClientId, DisconnectReason},
     Client, Display, DisplayHandle,
@@ -233,18 +234,19 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
 
     r#loop
         .insert_source(listening_socket, |client, _, state| {
+            let info = format!("{client:?}");
+
             // TODO: Graceful error handling
-            state
-                .display
-                .handle()
-                .insert_client(
-                    client,
-                    Arc::new(ClientData {
-                        // TODO: Limit the available globals
-                        globals: PrivilegedGlobals::all(),
-                    }),
-                )
-                .expect("Failed to register client");
+            if let Err(err) = state.display.handle().insert_client(
+                client,
+                Arc::new(ClientData {
+                    // TODO: Limit the available globals
+                    globals: PrivilegedGlobals::all(),
+                }),
+            ) {
+                // TODO: Provide info about the socket (name)
+                tracing::error!(%err, "Failed to register client with fd: {info}");
+            }
         })
         .unwrap();
 }
@@ -252,14 +254,14 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
 #[derive(Debug)]
 pub struct AerugoCompositor {
     display: DisplayHandle,
-    wl_compositor: CompositorState,
-    xdg_shell: XdgShellState,
-    seat_state: SeatState<Self>,
     shell: Shell,
     scene: Scene,
     // This is not what I want in the future, but is for testing.
     output: Output,
     backend: Box<dyn Backend>,
+    wl_compositor: CompositorState,
+    xdg_shell: XdgShellState,
+    seat_state: SeatState<Self>,
 }
 
 impl AerugoCompositor {
@@ -268,6 +270,7 @@ impl AerugoCompositor {
         let seat_state = SeatState::new();
         let wl_compositor = CompositorState::new::<Self>(&display);
         let xdg_shell = XdgShellState::new::<Self>(&display);
+        let _foreign_toplevel_list = display.create_global::<Self, ExtForeignToplevelListV1, _>(1, ());
         let output = Output::new(
             "Test output".into(),
             PhysicalProperties {
