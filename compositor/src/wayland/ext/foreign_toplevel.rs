@@ -8,9 +8,15 @@
 //
 // You can use all the types from my_protocol as if they went from `wayland_client::protocol`.
 pub use generated::{ext_foreign_toplevel_handle_v1, ext_foreign_toplevel_list_v1};
-use wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New};
+use wayland_server::{
+    backend::{ClientId, ObjectId},
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+};
 
-use crate::{shell::ToplevelId, AerugoCompositor};
+use crate::{
+    shell::{ForeignToplevelInstance, ToplevelId},
+    AerugoCompositor, ClientData, PrivilegedGlobals,
+};
 
 use self::{
     ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1, ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
@@ -31,45 +37,89 @@ mod generated {
 impl GlobalDispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
     fn bind(
         state: &mut Self,
-        handle: &DisplayHandle,
-        client: &Client,
+        _display: &DisplayHandle,
+        _client: &Client,
         resource: New<ExtForeignToplevelListV1>,
-        global_data: &(),
+        _global_data: &(),
         data_init: &mut DataInit<'_, Self>,
     ) {
-        todo!()
+        let instance = data_init.init(resource, ());
+        let _instance =
+            state
+                .shell
+                .foreign_toplevel_instances
+                .entry(instance.id())
+                .or_insert(ForeignToplevelInstance {
+                    instance,
+                    stopped: false,
+                });
+
+        // TODO: Send toplevels to instance.
+    }
+
+    fn can_view(client: Client, _global_data: &()) -> bool {
+        ClientData::get_data(&client)
+            .map(|data| data.is_visible(PrivilegedGlobals::FOREIGN_TOPLEVEL_LIST))
+            .unwrap_or(false)
     }
 }
 
 impl Dispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
     fn request(
         state: &mut Self,
-        client: &Client,
+        _client: &Client,
         resource: &ExtForeignToplevelListV1,
         request: ext_foreign_toplevel_list_v1::Request,
-        data: &(),
-        dhandle: &DisplayHandle,
-        data_init: &mut DataInit<'_, Self>,
+        _data: &(),
+        _display: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
     ) {
+        // in tree generated protocol
+        #[allow(unreachable_patterns)]
         match request {
-            ext_foreign_toplevel_list_v1::Request::Stop => todo!(),
-            ext_foreign_toplevel_list_v1::Request::Destroy => todo!(),
+            ext_foreign_toplevel_list_v1::Request::Stop => {
+                let Some(instance) = state.shell.foreign_toplevel_instances.get_mut(&resource.id()) else {
+                    return;
+                };
+
+                instance.stopped = true;
+            }
+            ext_foreign_toplevel_list_v1::Request::Destroy => {
+                // Dispatch::destroyed handles cleanup
+            }
+
+            _ => unreachable!(),
         }
+    }
+
+    fn destroyed(state: &mut Self, _client: ClientId, resource: ObjectId, _data: &()) {
+        let _ = state.shell.foreign_toplevel_instances.remove(&resource);
     }
 }
 
 impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for AerugoCompositor {
     fn request(
-        state: &mut Self,
-        client: &Client,
-        resource: &ExtForeignToplevelHandleV1,
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &ExtForeignToplevelHandleV1,
         request: ext_foreign_toplevel_handle_v1::Request,
-        data: &ToplevelId,
-        dhandle: &DisplayHandle,
-        data_init: &mut DataInit<'_, Self>,
+        _data: &ToplevelId,
+        _display: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
     ) {
+        // in tree generated protocol
+        #[allow(unreachable_patterns)]
         match request {
-            ext_foreign_toplevel_handle_v1::Request::Destroy => todo!(),
+            ext_foreign_toplevel_handle_v1::Request::Destroy => {
+                // TODO: Check for invalid destruction order in extension protocols.
+            }
+
+            _ => unreachable!(),
         }
+    }
+
+    fn destroyed(_state: &mut Self, _client: ClientId, _resource: ObjectId, _data: &ToplevelId) {
+        // TODO: Handle cleanup by removing the handle object from the instance so updates aren't sent until
+        // remapped
     }
 }

@@ -30,7 +30,9 @@ use smithay::{
     wayland::shell::xdg::ToplevelSurface,
     xwayland::X11Surface,
 };
-use wayland_server::protocol::wl_surface::WlSurface;
+use wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface};
+
+use crate::wayland::protocols::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
 
 /// The underlying surface.
 #[derive(Debug)]
@@ -41,6 +43,7 @@ pub enum Surface {
 
 #[derive(Debug)]
 pub struct ToplevelState {
+    /// Underlying surface of the toplevel.
     surface: Surface,
 
     // TODO: Attached texture.
@@ -70,7 +73,16 @@ pub struct Shell {
 
     pub toplevels: FxHashMap<ToplevelId, ToplevelState>,
 
+    /// State related to instances of the foreign toplevel protocols and extension protocols.
+    pub foreign_toplevel_instances: FxHashMap<ObjectId, ForeignToplevelInstance>,
+
     next_toplevel_id: ToplevelId,
+}
+
+#[derive(Debug)]
+pub struct ForeignToplevelInstance {
+    pub instance: ExtForeignToplevelListV1,
+    pub stopped: bool,
 }
 
 impl Shell {
@@ -78,6 +90,7 @@ impl Shell {
         Shell {
             pending_toplevels: Vec::new(),
             toplevels: Default::default(),
+            foreign_toplevel_instances: Default::default(),
             next_toplevel_id: NonZeroU64::new(1).unwrap(),
         }
     }
@@ -129,5 +142,9 @@ impl Shell {
 
             Surface::XWayland(_) => todo!(),
         }
+    }
+
+    pub fn get_state(&self, id: ToplevelId) -> Option<&ToplevelState> {
+        self.toplevels.get(&id)
     }
 }

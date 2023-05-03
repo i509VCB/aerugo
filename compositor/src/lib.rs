@@ -1,6 +1,6 @@
 use std::{
     error::Error,
-    io,
+    fmt, io,
     os::fd::{AsRawFd, OwnedFd},
     sync::{
         mpsc::{self, SendError},
@@ -9,6 +9,7 @@ use std::{
     thread::{self, JoinHandle, Thread},
 };
 
+use bitflags::bitflags;
 use calloop::{channel::SyncSender, generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 
 use backend::Backend;
@@ -19,7 +20,10 @@ use smithay::{
     output::{Output, PhysicalProperties},
     wayland::{compositor::CompositorState, shell::xdg::XdgShellState, socket::ListeningSocketSource},
 };
-use wayland_server::{Display, DisplayHandle};
+use wayland_server::{
+    backend::{ClientId, DisconnectReason},
+    Client, Display, DisplayHandle,
+};
 
 pub mod backend;
 pub mod forest;
@@ -233,7 +237,13 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
             state
                 .display
                 .handle()
-                .insert_client(client, Arc::new(()))
+                .insert_client(
+                    client,
+                    Arc::new(ClientData {
+                        // TODO: Limit the available globals
+                        globals: PrivilegedGlobals::all(),
+                    }),
+                )
                 .expect("Failed to register client");
         })
         .unwrap();
@@ -284,5 +294,67 @@ impl AerugoCompositor {
             output,
             backend,
         }
+    }
+}
+
+bitflags! {
+    /// Bitflag to describe what globals are visible to clients.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct PrivilegedGlobals: u32 {
+        /// Whether the `ext-foreign-toplevel-list-v1` global is available.
+        const FOREIGN_TOPLEVEL_LIST = 0x01;
+
+        /// Whether the `ext-foreign-toplevel-state-v1` global is available.
+        ///
+        /// This protocol is always enabled with the `ext-foreign-toplevel-list-v1` protocol.
+        ///
+        /// This is not enabled at the moment since the protocol is not yet done: https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/196
+        const FOREIGN_TOPLEVEL_STATE = 0x03;
+
+        /// Whether the foreign toplevel management global is available.
+        ///
+        /// This protocol is always enabled with the `ext-foreign-toplevel-state-v1` protocol.
+        const FOREIGN_TOPLEVEL_MANAGEMENT = 0x07;
+
+        /// Whether the client is XWayland.
+        ///
+        /// This will enable the `xwayland-shell-v1` and `zwp_xwayland-keyboard-grab-v1` protocols.
+        const XWAYLAND = 0x08;
+
+        /// Whether the `ext-session-lock-v1` global is available.
+        const SESSION_LOCK = 0x10;
+
+        /// Whether the `zwlr-layer-shell-v1` protocol is available.
+        ///
+        /// This will also make the `ext-layer-shell-v1` protocol available when merged: https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/28
+        const LAYER_SHELL = 0x20;
+
+        /// Whether the `aerugo-shell-v1` protocol is available.
+        const AERUGO_SHELL = 0x40;
+    }
+}
+
+#[derive(Debug)]
+pub struct ClientData {
+    globals: PrivilegedGlobals,
+}
+
+impl ClientData {
+    pub fn get_data(client: &Client) -> Option<&Self> {
+        client.get_data()
+    }
+
+    pub fn is_visible(&self, global: PrivilegedGlobals) -> bool {
+        self.globals.contains(global)
+    }
+}
+
+impl wayland_server::backend::ClientData for ClientData {
+    fn initialized(&self, _client_id: ClientId) {}
+
+    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+
+    fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <Self as fmt::Debug>::fmt(self, f)
     }
 }

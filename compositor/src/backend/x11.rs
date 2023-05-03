@@ -9,10 +9,7 @@ use smithay::{
         },
         egl::{EGLContext, EGLDisplay},
         renderer::{
-            element::{AsRenderElements, RenderElement},
-            gles2::Gles2Renderer,
-            utils::draw_render_elements,
-            Bind, Frame, Renderer,
+            element::AsRenderElements, gles2::Gles2Renderer, utils::draw_render_elements, Bind, Frame, Renderer,
         },
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface},
     },

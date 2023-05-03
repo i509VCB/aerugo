@@ -9,3 +9,5 @@ mod core;
 mod ext;
 
 mod xdg_shell;
+
+pub use ext::protocols;
