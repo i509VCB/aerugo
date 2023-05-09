@@ -99,9 +99,9 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
 
 impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for AerugoCompositor {
     fn request(
-        _state: &mut Self,
+        state: &mut Self,
         _client: &Client,
-        _resource: &ExtForeignToplevelHandleV1,
+        resource: &ExtForeignToplevelHandleV1,
         request: ext_foreign_toplevel_handle_v1::Request,
         _data: &ToplevelId,
         _display: &DisplayHandle,
@@ -112,6 +112,9 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for AerugoCompositor {
         match request {
             ext_foreign_toplevel_handle_v1::Request::Destroy => {
                 // TODO: Check for invalid destruction order in extension protocols.
+                let Some(_instance) = state.shell.foreign_toplevel_instances.get(&resource.id()) else {
+                    return;
+                };
             }
 
             _ => unreachable!(),
