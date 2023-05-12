@@ -37,10 +37,6 @@ pub struct Backend {
 }
 
 impl dyn super::Backend {
-    fn x11(&self) -> &Backend {
-        self.downcast_ref().expect("Not X11")
-    }
-
     fn x11_mut(&mut self) -> &mut Backend {
         self.downcast_mut().expect("Not X11")
     }
@@ -117,7 +113,7 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Loop) {
 }
 
 fn draw(aerugo: &mut Loop) {
-    let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
+    let backend = aerugo.comp.backend.x11_mut();
     let (buffer, _age) = backend.surface.buffer().unwrap();
     backend.renderer.bind(buffer).unwrap();
 

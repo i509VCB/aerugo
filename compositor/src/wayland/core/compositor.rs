@@ -37,6 +37,8 @@ impl CompositorHandler for Aerugo {
         // and are waiting for the acked state to be applied.
         Shell::commit(self, &surface);
     }
+
+    // TODO: Way to detect a surface was destroyed without IsAlive
 }
 
 smithay::delegate_compositor!(Aerugo);

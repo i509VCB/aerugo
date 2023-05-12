@@ -126,6 +126,12 @@ impl ToplevelState {
     pub fn map_count(&self) -> u64 {
         self.mapped_count
     }
+
+    pub fn remove_handle(&mut self, id: ObjectId) {
+        if let Some(index) = self.handles.iter().position(|handle| handle.id() == id) {
+            self.handles.remove(index);
+        }
+    }
 }
 
 /// The state of a toplevel.

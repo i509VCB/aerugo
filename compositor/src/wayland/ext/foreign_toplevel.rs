@@ -124,8 +124,9 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
         }
     }
 
-    fn destroyed(_state: &mut Self, _client: ClientId, _resource: ObjectId, _data: &ToplevelId) {
-        // TODO: Handle cleanup by removing the handle object from the instance so updates aren't sent until
-        // remapped
+    fn destroyed(state: &mut Self, _client: ClientId, resource: ObjectId, data: &ToplevelId) {
+        if let Some(toplevel) = state.shell.toplevels.get_mut(data) {
+            toplevel.remove_handle(resource);
+        };
     }
 }
