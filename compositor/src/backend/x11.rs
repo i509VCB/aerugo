@@ -22,7 +22,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::{scene::SceneGraphElement, Aerugo, AerugoCompositor};
+use crate::{scene::SceneGraphElement, Aerugo, Loop};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -30,15 +30,25 @@ pub struct Backend {
     window: Window,
     renderer: Gles2Renderer,
     surface: X11Surface,
-    r#loop: LoopHandle<'static, Aerugo>,
+    r#loop: LoopHandle<'static, Loop>,
     display: DisplayHandle,
     shm_state: ShmState,
     shutdown: bool,
 }
 
+impl dyn super::Backend {
+    fn x11(&self) -> &Backend {
+        self.downcast_ref().expect("Not X11")
+    }
+
+    fn x11_mut(&mut self) -> &mut Backend {
+        self.downcast_mut().expect("Not X11")
+    }
+}
+
 impl Backend {
     // TODO: Error type
-    pub fn new(r#loop: LoopHandle<'static, Aerugo>, display: DisplayHandle) -> Result<Self, ()> {
+    pub fn new(r#loop: LoopHandle<'static, Loop>, display: DisplayHandle) -> Result<Self, ()> {
         let backend = X11Backend::new().unwrap();
         let x11 = backend.handle();
 
@@ -80,7 +90,7 @@ impl Backend {
             r#loop,
             display: display.clone(),
             // TODO: Additional renderer shm formats
-            shm_state: ShmState::new::<AerugoCompositor>(&display, Vec::with_capacity(2)),
+            shm_state: ShmState::new::<Aerugo>(&display, Vec::with_capacity(2)),
             shutdown: false,
             renderer,
             surface,
@@ -88,7 +98,7 @@ impl Backend {
     }
 }
 
-fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
+fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Loop) {
     match event {
         X11Event::Refresh { window_id: _ } => draw(aerugo),
         X11Event::Input(_) => {}
@@ -106,7 +116,7 @@ fn dispatch_x11_event(event: X11Event, _: &mut (), aerugo: &mut Aerugo) {
     }
 }
 
-fn draw(aerugo: &mut Aerugo) {
+fn draw(aerugo: &mut Loop) {
     let backend: &mut Backend = &mut aerugo.comp.backend.downcast_mut().unwrap();
     let (buffer, _age) = backend.surface.buffer().unwrap();
     backend.renderer.bind(buffer).unwrap();

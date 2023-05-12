@@ -13,7 +13,7 @@ use smithay::{
 };
 use wayland_server::DisplayHandle;
 
-use crate::Aerugo;
+use crate::Loop;
 
 pub trait Backend: fmt::Debug + Downcast {
     fn shm_state(&self) -> &ShmState;
@@ -39,7 +39,7 @@ pub trait Backend: fmt::Debug + Downcast {
 impl_downcast!(Backend);
 
 pub fn default_backend(
-    r#loop: LoopHandle<'static, Aerugo>,
+    r#loop: LoopHandle<'static, Loop>,
     display: DisplayHandle,
 ) -> Result<Box<dyn Backend>, Box<dyn Error>> {
     // TODO: X11 backend only exists right now, so the backend selection is ignored.

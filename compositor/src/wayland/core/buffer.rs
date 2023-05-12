@@ -8,21 +8,21 @@ use smithay::{
 };
 use wayland_server::protocol::wl_buffer;
 
-use crate::AerugoCompositor;
+use crate::Aerugo;
 
-impl BufferHandler for AerugoCompositor {
+impl BufferHandler for Aerugo {
     fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
 }
 
-impl ShmHandler for AerugoCompositor {
+impl ShmHandler for Aerugo {
     fn shm_state(&self) -> &ShmState {
         self.backend.shm_state()
     }
 }
 
-smithay::delegate_shm!(AerugoCompositor);
+smithay::delegate_shm!(Aerugo);
 
-impl DmabufHandler for AerugoCompositor {
+impl DmabufHandler for Aerugo {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
         self.backend.dmabuf_state()
     }
@@ -32,4 +32,4 @@ impl DmabufHandler for AerugoCompositor {
     }
 }
 
-smithay::delegate_dmabuf!(AerugoCompositor);
+smithay::delegate_dmabuf!(Aerugo);

@@ -15,7 +15,7 @@ use wayland_server::{
 
 use crate::{
     shell::{ForeignToplevelInstance, ToplevelId},
-    AerugoCompositor, ClientData, PrivilegedGlobals,
+    Aerugo, ClientData, PrivilegedGlobals,
 };
 
 use self::{
@@ -34,27 +34,30 @@ mod generated {
     wayland_scanner::generate_server_code!("protocols/ext-foreign-toplevel-list-v1.xml");
 }
 
-impl GlobalDispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
+impl GlobalDispatch<ExtForeignToplevelListV1, ()> for Aerugo {
     fn bind(
         state: &mut Self,
-        _display: &DisplayHandle,
-        _client: &Client,
+        display: &DisplayHandle,
+        client: &Client,
         resource: New<ExtForeignToplevelListV1>,
         _global_data: &(),
         data_init: &mut DataInit<'_, Self>,
     ) {
         let instance = data_init.init(resource, ());
-        let _instance =
-            state
-                .shell
-                .foreign_toplevel_instances
-                .entry(instance.id())
-                .or_insert(ForeignToplevelInstance {
-                    instance,
-                    stopped: false,
-                });
+        let instance = state
+            .shell
+            .foreign_toplevel_instances
+            .entry(instance.id())
+            .or_insert(ForeignToplevelInstance {
+                instance,
+                stopped: false,
+            });
 
         // TODO: Send toplevels to instance.
+        for toplevel in state.shell.toplevels.values_mut() {
+            let identifier = toplevel.make_identifier(state.generation);
+            toplevel.create_handle(&identifier, &instance.instance, display, client);
+        }
     }
 
     fn can_view(client: Client, _global_data: &()) -> bool {
@@ -64,7 +67,7 @@ impl GlobalDispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
     }
 }
 
-impl Dispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
+impl Dispatch<ExtForeignToplevelListV1, ()> for Aerugo {
     fn request(
         state: &mut Self,
         _client: &Client,
@@ -97,7 +100,7 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for AerugoCompositor {
     }
 }
 
-impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for AerugoCompositor {
+impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
     fn request(
         state: &mut Self,
         _client: &Client,

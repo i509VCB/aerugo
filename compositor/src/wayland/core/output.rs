@@ -1,5 +1,5 @@
 use smithay::delegate_output;
 
-use crate::AerugoCompositor;
+use crate::Aerugo;
 
-delegate_output!(AerugoCompositor);
+delegate_output!(Aerugo);

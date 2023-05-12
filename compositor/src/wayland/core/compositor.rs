@@ -6,9 +6,9 @@ use smithay::{
 };
 use wayland_server::protocol::wl_surface::WlSurface;
 
-use crate::AerugoCompositor;
+use crate::{shell::Shell, Aerugo};
 
-impl CompositorHandler for AerugoCompositor {
+impl CompositorHandler for Aerugo {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.wl_compositor
     }
@@ -35,8 +35,8 @@ impl CompositorHandler for AerugoCompositor {
 
         // Commit the root surface state in the shell. This will complete any transactions that are in flight
         // and are waiting for the acked state to be applied.
-        self.shell.commit(&*surface);
+        Shell::commit(self, &surface);
     }
 }
 
-smithay::delegate_compositor!(AerugoCompositor);
+smithay::delegate_compositor!(Aerugo);

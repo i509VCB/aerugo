@@ -1,6 +1,6 @@
 use std::{
     error::Error,
-    fmt, io,
+    io,
     os::fd::{AsRawFd, OwnedFd},
     sync::{
         mpsc::{self, SendError},
@@ -9,31 +9,25 @@ use std::{
     thread::{self, JoinHandle, Thread},
 };
 
-use bitflags::bitflags;
 use calloop::{channel::SyncSender, generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 
 use backend::Backend;
-use scene::Scene;
-use shell::Shell;
-use smithay::{
-    input::SeatState,
-    output::{Output, PhysicalProperties},
-    wayland::{compositor::CompositorState, shell::xdg::XdgShellState, socket::ListeningSocketSource},
-};
-use wayland::protocols::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
-use wayland_server::{
-    backend::{ClientId, DisconnectReason},
-    Client, Display, DisplayHandle,
-};
+use smithay::wayland::socket::ListeningSocketSource;
+use wayland_server::{Display, DisplayHandle};
 
 pub mod backend;
 pub mod forest;
 mod scene;
 mod shell;
+mod state;
 mod wayland;
 
+pub use state::Aerugo;
+
+use crate::state::{ClientData, PrivilegedGlobals};
+
 type BackendConstructor = Box<
-    dyn FnOnce(LoopHandle<'static, Aerugo>, DisplayHandle) -> Result<Box<dyn Backend>, Box<dyn Error>> + Send + 'static,
+    dyn FnOnce(LoopHandle<'static, Loop>, DisplayHandle) -> Result<Box<dyn Backend>, Box<dyn Error>> + Send + 'static,
 >;
 
 /// Configuration used to create a server instance.
@@ -44,7 +38,7 @@ pub struct Configuration {
 impl Configuration {
     pub fn new<B>(b: B) -> Self
     where
-        B: FnOnce(LoopHandle<'static, Aerugo>, DisplayHandle) -> Result<Box<dyn Backend>, Box<dyn Error>>
+        B: FnOnce(LoopHandle<'static, Loop>, DisplayHandle) -> Result<Box<dyn Backend>, Box<dyn Error>>
             + Send
             + 'static,
     {
@@ -79,7 +73,7 @@ impl Configuration {
             let (send_server, recv_server) = calloop::channel::sync_channel::<ExecutorMessage>(5);
             send.send((signal, send_server)).expect("Executor thread died");
 
-            let mut aerugo = Aerugo::new(&r#loop, self.backend_constructor).expect("TODO: Error type");
+            let mut aerugo = Loop::new(&r#loop, self.backend_constructor).expect("TODO: Error type");
 
             {
                 let r#loop = r#loop.handle();
@@ -163,14 +157,14 @@ enum ExecutorMessage {
 }
 
 #[derive(Debug)]
-pub struct Aerugo {
+pub struct Loop {
     r#loop: LoopHandle<'static, Self>,
     signal: LoopSignal,
-    display: Display<AerugoCompositor>,
-    comp: AerugoCompositor,
+    display: Display<Aerugo>,
+    comp: Aerugo,
 }
 
-impl Aerugo {
+impl Loop {
     pub fn new(r#loop: &EventLoop<'static, Self>, backend: BackendConstructor) -> Result<Self, ()> {
         let mut display = Display::new().expect("Failed to initialize Wayland display");
 
@@ -185,7 +179,7 @@ impl Aerugo {
 
         let backend = backend(r#loop.clone(), display.handle()).expect("TODO: Error type");
 
-        let comp = AerugoCompositor::new(&r#loop, display.handle(), backend);
+        let comp = Aerugo::new(&r#loop, display.handle(), backend);
 
         Ok(Self {
             r#loop,
@@ -215,7 +209,7 @@ impl Aerugo {
     }
 }
 
-fn register_display_source(display: &mut Display<AerugoCompositor>, r#loop: &LoopHandle<'static, Aerugo>) {
+fn register_display_source(display: &mut Display<Aerugo>, r#loop: &LoopHandle<'static, Loop>) {
     let poll_fd = display.backend().poll_fd().as_raw_fd();
 
     r#loop
@@ -226,7 +220,7 @@ fn register_display_source(display: &mut Display<AerugoCompositor>, r#loop: &Loo
         .unwrap();
 }
 
-fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
+fn register_listening_socket(r#loop: &LoopHandle<'static, Loop>) {
     let listening_socket = ListeningSocketSource::new_auto().expect("Failed to bind a socket");
 
     let socket = listening_socket.socket_name().to_owned();
@@ -249,115 +243,4 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Aerugo>) {
             }
         })
         .unwrap();
-}
-
-#[derive(Debug)]
-pub struct AerugoCompositor {
-    display: DisplayHandle,
-    shell: Shell,
-    scene: Scene,
-    // This is not what I want in the future, but is for testing.
-    output: Output,
-    backend: Box<dyn Backend>,
-    wl_compositor: CompositorState,
-    xdg_shell: XdgShellState,
-    seat_state: SeatState<Self>,
-}
-
-impl AerugoCompositor {
-    fn new(_loop: &LoopHandle<'static, Aerugo>, display: DisplayHandle, backend: Box<dyn Backend>) -> Self {
-        // Initialize common globals
-        let seat_state = SeatState::new();
-        let wl_compositor = CompositorState::new::<Self>(&display);
-        let xdg_shell = XdgShellState::new::<Self>(&display);
-        let _foreign_toplevel_list = display.create_global::<Self, ExtForeignToplevelListV1, _>(1, ());
-        let output = Output::new(
-            "Test output".into(),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: smithay::output::Subpixel::Unknown,
-                make: String::new(),
-                model: String::new(),
-            },
-        );
-        output.create_global::<Self>(&display);
-
-        let mut scene = Scene::new();
-        scene.create_output(output.clone());
-
-        let shell = Shell::new();
-
-        Self {
-            display,
-            wl_compositor,
-            xdg_shell,
-            seat_state,
-            shell,
-            scene,
-            output,
-            backend,
-        }
-    }
-}
-
-bitflags! {
-    /// Bitflag to describe what globals are visible to clients.
-    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-    pub struct PrivilegedGlobals: u32 {
-        /// Whether the `ext-foreign-toplevel-list-v1` global is available.
-        const FOREIGN_TOPLEVEL_LIST = 0x01;
-
-        /// Whether the `ext-foreign-toplevel-state-v1` global is available.
-        ///
-        /// This protocol is always enabled with the `ext-foreign-toplevel-list-v1` protocol.
-        ///
-        /// This is not enabled at the moment since the protocol is not yet done: https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/196
-        const FOREIGN_TOPLEVEL_STATE = 0x03;
-
-        /// Whether the foreign toplevel management global is available.
-        ///
-        /// This protocol is always enabled with the `ext-foreign-toplevel-state-v1` protocol.
-        const FOREIGN_TOPLEVEL_MANAGEMENT = 0x07;
-
-        /// Whether the client is XWayland.
-        ///
-        /// This will enable the `xwayland-shell-v1` and `zwp_xwayland-keyboard-grab-v1` protocols.
-        const XWAYLAND = 0x08;
-
-        /// Whether the `ext-session-lock-v1` global is available.
-        const SESSION_LOCK = 0x10;
-
-        /// Whether the `zwlr-layer-shell-v1` protocol is available.
-        ///
-        /// This will also make the `ext-layer-shell-v1` protocol available when merged: https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/28
-        const LAYER_SHELL = 0x20;
-
-        /// Whether the `aerugo-shell-v1` protocol is available.
-        const AERUGO_SHELL = 0x40;
-    }
-}
-
-#[derive(Debug)]
-pub struct ClientData {
-    globals: PrivilegedGlobals,
-}
-
-impl ClientData {
-    pub fn get_data(client: &Client) -> Option<&Self> {
-        client.get_data()
-    }
-
-    pub fn is_visible(&self, global: PrivilegedGlobals) -> bool {
-        self.globals.contains(global)
-    }
-}
-
-impl wayland_server::backend::ClientData for ClientData {
-    fn initialized(&self, _client_id: ClientId) {}
-
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
-
-    fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <Self as fmt::Debug>::fmt(self, f)
-    }
 }

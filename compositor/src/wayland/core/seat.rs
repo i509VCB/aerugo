@@ -1,9 +1,9 @@
 use smithay::input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState};
 use wayland_server::protocol::wl_surface;
 
-use crate::AerugoCompositor;
+use crate::Aerugo;
 
-impl SeatHandler for AerugoCompositor {
+impl SeatHandler for Aerugo {
     type KeyboardFocus = wl_surface::WlSurface;
     type PointerFocus = wl_surface::WlSurface;
 

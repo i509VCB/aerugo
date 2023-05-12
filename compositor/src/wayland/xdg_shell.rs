@@ -7,9 +7,9 @@ use smithay::{
 };
 use wayland_server::protocol::{wl_output, wl_seat, wl_surface};
 
-use crate::AerugoCompositor;
+use crate::Aerugo;
 
-impl XdgShellHandler for AerugoCompositor {
+impl XdgShellHandler for Aerugo {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell
     }
@@ -91,4 +91,4 @@ impl XdgShellHandler for AerugoCompositor {
     }
 }
 
-smithay::delegate_xdg_shell!(AerugoCompositor);
+smithay::delegate_xdg_shell!(Aerugo);
