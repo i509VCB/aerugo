@@ -8,9 +8,7 @@ use smithay::{
             gbm::GbmAllocator,
         },
         egl::{EGLContext, EGLDisplay},
-        renderer::{
-            element::AsRenderElements, gles2::Gles2Renderer, utils::draw_render_elements, Bind, Frame, Renderer,
-        },
+        renderer::{element::AsRenderElements, gles::GlesRenderer, utils::draw_render_elements, Bind, Frame, Renderer},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface},
     },
     reexports::gbm::{self, BufferObjectFlags},
@@ -28,7 +26,7 @@ use crate::{scene::SceneGraphElement, Aerugo, Loop};
 pub struct Backend {
     x11: X11Handle,
     window: Window,
-    renderer: Gles2Renderer,
+    renderer: GlesRenderer,
     surface: X11Surface,
     r#loop: LoopHandle<'static, Loop>,
     display: DisplayHandle,
@@ -76,7 +74,7 @@ impl Backend {
             )
             .unwrap();
 
-        let renderer = unsafe { Gles2Renderer::new(context) }.unwrap();
+        let renderer = unsafe { GlesRenderer::new(context) }.unwrap();
 
         r#loop.insert_source(backend, dispatch_x11_event).unwrap();
 
@@ -122,6 +120,7 @@ fn draw(aerugo: &mut Loop) {
             &mut backend.renderer,
             (0, 0).into(),
             smithay::utils::Scale { x: 1., y: 1. },
+            1.0,
         )
         .into()
     } else {
@@ -147,7 +146,7 @@ fn draw(aerugo: &mut Loop) {
             )
             .unwrap();
 
-        draw_render_elements::<Gles2Renderer, _, _>(
+        draw_render_elements::<GlesRenderer, _, _>(
             &mut frame,
             1.0,
             &elems,

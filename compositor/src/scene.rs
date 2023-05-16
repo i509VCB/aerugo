@@ -447,6 +447,7 @@ where
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Vec<C> {
         let Some(iter) = self.scene.forest.dfs_descend(self.root.into()) else {
             return Vec::new();

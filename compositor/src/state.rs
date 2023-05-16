@@ -8,7 +8,10 @@ use calloop::LoopHandle;
 use smithay::{
     input::SeatState,
     output::{Output, PhysicalProperties},
-    wayland::{compositor::CompositorState, shell::xdg::XdgShellState},
+    wayland::{
+        compositor::{CompositorClientState, CompositorState},
+        shell::xdg::XdgShellState,
+    },
 };
 use wayland_server::{
     backend::{ClientId, DisconnectReason},
@@ -119,11 +122,16 @@ bitflags! {
 pub struct ClientData {
     // TODO: Make private
     pub(super) globals: PrivilegedGlobals,
+    pub(super) compositor: CompositorClientState,
 }
 
 impl ClientData {
     pub fn get_data(client: &Client) -> Option<&Self> {
         client.get_data()
+    }
+
+    pub fn client_compositor_state(&self) -> &CompositorClientState {
+        &self.compositor
     }
 
     pub fn is_visible(&self, global: PrivilegedGlobals) -> bool {

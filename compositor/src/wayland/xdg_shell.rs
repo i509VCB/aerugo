@@ -82,9 +82,7 @@ impl XdgShellHandler for Aerugo {
         // TODO: forward to wm
     }
 
-    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {
-        // TODO: Handle by destroying toplevel handles.
-    }
+    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {}
 
     fn popup_destroyed(&mut self, _surface: PopupSurface) {
         // TODO: Handle popup death

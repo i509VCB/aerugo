@@ -26,6 +26,7 @@ use std::num::NonZeroU64;
 
 use rustc_hash::FxHashMap;
 use smithay::{
+    backend::renderer::utils::with_renderer_surface_state,
     utils::{Logical, Serial, Size},
     wayland::{
         compositor,
@@ -43,6 +44,26 @@ use crate::{
     Aerugo,
 };
 
+#[derive(Debug)]
+pub struct Shell {
+    // TODO: Remove surfaces that are never mapped and destroyed.
+    /// Toplevel surfaces pending an initial commit.
+    pub pending_toplevels: Vec<ToplevelSurface>,
+
+    pub toplevels: FxHashMap<ToplevelId, Toplevel>,
+
+    /// State related to instances of the foreign toplevel protocols and extension protocols.
+    pub foreign_toplevel_instances: FxHashMap<ObjectId, ForeignToplevelInstance>,
+
+    next_toplevel_id: ToplevelId,
+}
+
+#[derive(Debug)]
+pub struct ForeignToplevelInstance {
+    pub instance: ExtForeignToplevelListV1,
+    pub stopped: bool,
+}
+
 /// The underlying surface.
 #[derive(Debug)]
 pub enum Surface {
@@ -50,29 +71,31 @@ pub enum Surface {
     XWayland(X11Surface),
 }
 
+/// A toplevel surface.
 #[derive(Debug)]
-pub struct ToplevelState {
+pub struct Toplevel {
+    /// The id of the toplevel.
     id: ToplevelId,
 
-    /// Underlying surface of the toplevel.
+    /// Underlying surface.
     surface: Surface,
 
-    /// Acknowledged state of the toplevel.
+    /// Current state.
     current: State,
 
-    /// The pending state of the toplevel.
+    /// The pending state.
     ///
-    /// This is updated when the configure is acknowledged.
+    /// This is updated when the configure is acked.
     pending: Option<Mapped>,
 
     /// Foreign handles to this toplevel.
     handles: Vec<ExtForeignToplevelHandleV1>,
-
-    mapped_count: u64,
     // TODO: xdg-foreign id?
 }
 
-impl ToplevelState {
+pub type ToplevelId = NonZeroU64;
+
+impl Toplevel {
     pub fn create_handle(
         &mut self,
         identifier: &str,
@@ -109,22 +132,19 @@ impl ToplevelState {
         self.handles.push(handle.clone());
     }
 
+    pub fn wl_surface(&self) -> Option<WlSurface> {
+        match &self.surface {
+            Surface::Toplevel(toplevel) => Some(toplevel.wl_surface().clone()),
+            Surface::XWayland(xwayland) => xwayland.wl_surface(),
+        }
+    }
+
     /// For client developers:
     ///
     /// The protocol discourages trying to use the identifier to guess things like what was last mapped:
     /// > How the generation value is used when generating the identifier is implementation dependent.
     pub fn make_identifier(&self, generation: u64) -> String {
-        let id = self.id();
-        let mapped_count = self.map_count();
-        format!("{generation:08X}{id:08X}{mapped_count:08X}")
-    }
-
-    pub fn id(&self) -> ToplevelId {
-        self.id
-    }
-
-    pub fn map_count(&self) -> u64 {
-        self.mapped_count
+        format!("{:016X}{:016X}", generation, self.id)
     }
 
     pub fn remove_handle(&mut self, id: ObjectId) {
@@ -162,27 +182,6 @@ struct Mapped {
     serial: Serial,
 }
 
-pub type ToplevelId = NonZeroU64;
-
-#[derive(Debug)]
-pub struct Shell {
-    /// Toplevel surfaces pending an initial commit.
-    pub pending_toplevels: Vec<ToplevelSurface>,
-
-    pub toplevels: FxHashMap<ToplevelId, ToplevelState>,
-
-    /// State related to instances of the foreign toplevel protocols and extension protocols.
-    pub foreign_toplevel_instances: FxHashMap<ObjectId, ForeignToplevelInstance>,
-
-    next_toplevel_id: ToplevelId,
-}
-
-#[derive(Debug)]
-pub struct ForeignToplevelInstance {
-    pub instance: ExtForeignToplevelListV1,
-    pub stopped: bool,
-}
-
 impl Shell {
     pub fn new() -> Self {
         Shell {
@@ -194,6 +193,8 @@ impl Shell {
     }
 
     pub fn commit(comp: &mut Aerugo, surface: &WlSurface) {
+        let has_buffer = with_renderer_surface_state(surface, |state| state.buffer().is_some());
+
         // If the surface is pending, tell the WM about the new window.
         if let Some(toplevel_index) = comp
             .shell
@@ -202,6 +203,12 @@ impl Shell {
             .position(|toplevel| toplevel.wl_surface() == surface)
         {
             let toplevel = comp.shell.pending_toplevels.remove(toplevel_index);
+
+            // Ensure the toplevel has no attached buffer during initial commit
+            if has_buffer {
+                todo!("Either add XdgSurface to ToplevelSurface or search")
+                // TODO: Send UnconfiguredBuffer
+            }
 
             // TODO: Remove this temporary configure and make the WM send the configure.
             toplevel.send_configure();
@@ -215,70 +222,52 @@ impl Shell {
 
             comp.shell.toplevels.insert(
                 id,
-                ToplevelState {
+                Toplevel {
                     id,
                     surface: Surface::Toplevel(toplevel),
                     current: State::default(),
                     pending: None,
                     handles: Vec::new(),
-                    mapped_count: 0,
                 },
             );
 
             return;
         }
 
-        // TODO: Check if the surface is a toplevel and ack the state.
-        //
-        // TODO: Could store id in surface state and lookup id vs worst case O(1) list lookup
-        let toplevel = comp
-            .shell
-            .toplevels
-            .values_mut()
-            .find(|state| match &state.surface {
-                Surface::Toplevel(toplevel) => surface == toplevel.wl_surface(),
-                Surface::XWayland(xwayland) => Some(surface) == xwayland.wl_surface().as_ref(),
-            })
-            .unwrap();
+        // If the surface is mapped (which it will be if it is not pending) and a buffer is no longer attached
+        // then unmap the surface and return it to pending.
+        if !has_buffer {
+            if let Some(key) = comp
+                .shell
+                .toplevels
+                .iter()
+                .find_map(|(key, toplevel)| (toplevel.wl_surface().as_ref() == Some(surface)).then_some(*key))
+            {
+                if let Some(toplevel) = comp.shell.toplevels.remove(&key) {
+                    // TODO: Tell ext-foreign-toplevel objects the surface is closed.
 
-        let _mapped = match &mut toplevel.current {
-            State::NotMapped => {
-                let identifier = toplevel.make_identifier(comp.generation);
-
-                // init foreign toplevel handle
-                toplevel.current = State::Mapped {
-                    state: Mapped {
-                        size: (0, 0).into(), // TODO
-                        serial: 0.into(),    // TODO
-                    },
-                    identifier: identifier.clone(),
-                };
-
-                for instance in comp.shell.foreign_toplevel_instances.values() {
-                    let Some(client) = instance.instance.client() else {
-                        continue;
-                    };
-
-                    toplevel.create_handle(&identifier, &instance.instance, &comp.display, &client);
+                    match toplevel.surface {
+                        Surface::Toplevel(surface) => comp.shell.pending_toplevels.push(surface),
+                        Surface::XWayland(_) => todo!("How to handle xwayland?"),
+                    }
                 }
-
-                let State::Mapped { ref mut state, .. } = toplevel.current else {
-                    unreachable!()
-                };
-
-                state
             }
-            State::Mapped { ref mut state, .. } => {
-                // TODO: Handle null buffer attach (effectively unmapping)
-                state
-            }
-        };
 
-        // TODO: Apply pending state.
-        if let Some(_pending) = toplevel.pending.take() {}
+            // Unmapped, propagate nothing more
+            return;
+        }
+
+        // Apply updates to surface state
+        // TODO
     }
 
-    pub fn get_state(&self, id: ToplevelId) -> Option<&ToplevelState> {
+    pub fn destroyed(comp: &mut Aerugo, surface: &WlSurface) {}
+
+    pub fn get_state(&self, id: ToplevelId) -> Option<&Toplevel> {
         self.toplevels.get(&id)
+    }
+
+    pub fn get_state_mut(&mut self, id: ToplevelId) -> Option<&mut Toplevel> {
+        self.toplevels.get_mut(&id)
     }
 }

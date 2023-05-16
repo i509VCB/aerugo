@@ -12,7 +12,7 @@ use std::{
 use calloop::{channel::SyncSender, generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction};
 
 use backend::Backend;
-use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::{compositor::CompositorClientState, socket::ListeningSocketSource};
 use wayland_server::{Display, DisplayHandle};
 
 pub mod backend;
@@ -236,6 +236,7 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Loop>) {
                 Arc::new(ClientData {
                     // TODO: Limit the available globals
                     globals: PrivilegedGlobals::all(),
+                    compositor: CompositorClientState::default(),
                 }),
             ) {
                 // TODO: Provide info about the socket (name)

@@ -22,7 +22,7 @@ features = [
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
-rev = "f2728691b567fae29bdb4ff186b9cb72adaaf73c"
+rev = "7f16dfae49241cbeb0167fd20dc2b9f8215264bb"
 default-features = false
 features = [
 	"backend_egl",
