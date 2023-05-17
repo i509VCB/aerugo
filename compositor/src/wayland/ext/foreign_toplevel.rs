@@ -53,10 +53,20 @@ impl GlobalDispatch<ExtForeignToplevelListV1, ()> for Aerugo {
                 stopped: false,
             });
 
-        // TODO: Send toplevels to instance.
+        let mut new_handles = Vec::with_capacity(state.shell.toplevels.len());
+
+        // Create all toplevel handle instances to ensure that extension protocols do not refer to handles
+        // that were not yet created.
         for toplevel in state.shell.toplevels.values_mut() {
-            let identifier = toplevel.make_identifier(state.generation);
-            toplevel.create_handle(&identifier, &instance.instance, display, client);
+            new_handles.push((
+                toplevel.create_handle(state.generation, &instance.instance, display, client),
+                toplevel,
+            ));
+        }
+
+        // Now describe the toplevels.
+        for (handle, toplevel) in new_handles {
+            toplevel.initialize_handle(&handle);
         }
     }
 

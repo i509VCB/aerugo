@@ -41,6 +41,10 @@ impl CompositorHandler for Aerugo {
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
         ClientData::get_data(client).unwrap().client_compositor_state()
     }
+
+    fn destroyed(&mut self, surface: &WlSurface) {
+        Shell::remove_toplevel(self, surface)
+    }
 }
 
 smithay::delegate_compositor!(Aerugo);

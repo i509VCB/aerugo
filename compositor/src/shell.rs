@@ -1,3 +1,47 @@
+//! The shell implementation
+//!
+//! # Toplevel state machine
+//!
+//! When a toplevel (xdg_toplevel or xwayland surface) is mapped, the toplevel will go through three states:
+//! new, not yet mapped and mapped. The reason for these states is to fulfill the requirements for
+//! implementing the xdg-shell protocol.
+//!
+//! The state machine for a toplevel is shown below:
+//!
+//! ```text
+//! /---> New ---> Possible to map ---> Mapped ---\
+//! |              ^             |      ^    |    |
+//! |              \-------------/      \----/    |
+//! |                                             |
+//! \---------------------------------------------/
+//! ```
+//!
+//! A toplevel starts in the `New` state. A toplevel enters this state when it is created. To make a toplevel
+//! possible to map, it must be transitioned to the next state. To make a toplevel possible to map, the client
+//! must send an initial commit. During the initial commit the client may provide some hints about how the toplevel
+//! should be configured. When a surface is new, the client cannot attach anything to present yet.
+//!
+//! After the initial commit the server will configure the toplevel. A configure describes the new state of the
+//! toplevel. Before the client can apply this state, the client must acknowledge the configure. After the
+//! configure is acknowledged the client can apply the configured state in the next commit. After the first
+//! configure, the client may attach a buffer to map the toplevel. Otherwise the client and server could
+//! continue to negotiate the current state. This means the client may perform a commit with no attached buffer
+//! after the initial configure.
+//!
+//! After a buffer is attached the surface can be mapped. A mapped surface is not necessarily visible, but can
+//! be made visible by the window management. For each future configure and or commit, the toplevel will stay
+//! mapped. Only when a null buffer is attached, the toplevel is unmapped and becomes new again.
+//!
+//! The toplevel can also be destroyed at any state and if mapped, the surface will be unmapped.
+//!
+//! # Transactions
+//!
+//! **TODO**
+//!
+//! # Window management
+//!
+//! **TODO**
+
 #![allow(dead_code)]
 
 // TODO: XWayland
@@ -22,7 +66,7 @@ If the clients fail to commit the previous transaction states, should the WM's n
 client state, and cancel the previous transaction?
 */
 
-use std::num::NonZeroU64;
+use std::{collections::hash_map::Entry, num::NonZeroU64};
 
 use rustc_hash::FxHashMap;
 use smithay::{
@@ -48,8 +92,11 @@ use crate::{
 pub struct Shell {
     // TODO: Remove surfaces that are never mapped and destroyed.
     /// Toplevel surfaces pending an initial commit.
+    ///
+    /// Toplevels in this state are effectively new.
     pub pending_toplevels: Vec<ToplevelSurface>,
 
+    /// Toplevels that are able to or are mapped.
     pub toplevels: FxHashMap<ToplevelId, Toplevel>,
 
     /// State related to instances of the foreign toplevel protocols and extension protocols.
@@ -98,38 +145,69 @@ pub type ToplevelId = NonZeroU64;
 impl Toplevel {
     pub fn create_handle(
         &mut self,
-        identifier: &str,
+        generation: u64,
         instance: &ExtForeignToplevelListV1,
         display: &DisplayHandle,
         client: &Client,
-    ) {
+    ) -> ExtForeignToplevelHandleV1 {
+        // An identifier is made of a 64-bit generation value created from a timestamp on startup and a 64-bit
+        // monotonic counter. Aerugo coverts both of these into hex to create the identifier. Clients should
+        // NOT rely on the behavior which Aerugo uses to allocate identifiers.
+        let identifier = format!("{generation:016X}{:016X}", self.id);
         let handle = client
             .create_resource::<ExtForeignToplevelHandleV1, _, Aerugo>(display, 1, self.id)
             .unwrap();
         instance.toplevel(&handle);
         handle.identifier(identifier.into());
-
-        match self.surface {
-            Surface::Toplevel(ref surface) => compositor::with_states(surface.wl_surface(), |states| {
-                let data = states.data_map.get::<XdgToplevelSurfaceData>().unwrap().lock().unwrap();
-
-                if let Some(ref app_id) = data.app_id {
-                    handle.app_id(app_id.into());
-                }
-
-                if let Some(ref title) = data.title {
-                    handle.title(title.into());
-                }
-            }),
-            Surface::XWayland(ref surface) => {
-                handle.title(surface.title());
-                // The class of the window is the X11 equivalent to app id.
-                handle.app_id(surface.class());
-            }
-        };
-
-        handle.done();
         self.handles.push(handle.clone());
+        // Defer sending other information about the toplevel handles.
+        handle
+    }
+
+    /// Initialize the state of a toplevel handle.
+    pub fn initialize_handle(&self, handle: &ExtForeignToplevelHandleV1) {
+        if let Some(title) = self.title() {
+            handle.title(title);
+        }
+
+        if let Some(app_id) = self.app_id() {
+            handle.app_id(app_id);
+        }
+
+        // Apply the current state of the toplevel handle.
+        handle.done();
+    }
+
+    pub fn title(&self) -> Option<String> {
+        match self.surface {
+            Surface::Toplevel(ref toplevel) => compositor::with_states(&toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .title
+                    .clone()
+            }),
+            Surface::XWayland(ref surface) => Some(surface.title()),
+        }
+    }
+
+    pub fn app_id(&self) -> Option<String> {
+        match self.surface {
+            Surface::Toplevel(ref toplevel) => compositor::with_states(&toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .app_id
+                    .clone()
+            }),
+            Surface::XWayland(ref surface) => Some(surface.class()),
+        }
     }
 
     pub fn wl_surface(&self) -> Option<WlSurface> {
@@ -137,14 +215,6 @@ impl Toplevel {
             Surface::Toplevel(toplevel) => Some(toplevel.wl_surface().clone()),
             Surface::XWayland(xwayland) => xwayland.wl_surface(),
         }
-    }
-
-    /// For client developers:
-    ///
-    /// The protocol discourages trying to use the identifier to guess things like what was last mapped:
-    /// > How the generation value is used when generating the identifier is implementation dependent.
-    pub fn make_identifier(&self, generation: u64) -> String {
-        format!("{:016X}{:016X}", generation, self.id)
     }
 
     pub fn remove_handle(&mut self, id: ObjectId) {
@@ -157,9 +227,9 @@ impl Toplevel {
 /// The state of a toplevel.
 #[derive(Debug, Default)]
 enum State {
-    /// The toplevel is not mapped.
+    /// The toplevel is not yet mapped, but can be mapped once acked.
     #[default]
-    NotMapped,
+    NotYetMapped,
 
     /// The toplevel is currently mapped.
     Mapped {
@@ -220,16 +290,34 @@ impl Shell {
                 .checked_add(1)
                 .expect("u64 overflow (unlikely)");
 
-            comp.shell.toplevels.insert(
+            let toplevel = comp.shell.toplevels.entry(id).or_insert(Toplevel {
                 id,
-                Toplevel {
-                    id,
-                    surface: Surface::Toplevel(toplevel),
-                    current: State::default(),
-                    pending: None,
-                    handles: Vec::new(),
-                },
-            );
+                surface: Surface::Toplevel(toplevel),
+                current: State::default(),
+                pending: None,
+                handles: Vec::new(),
+            });
+
+            let mut new_instances = Vec::with_capacity(comp.shell.foreign_toplevel_instances.len());
+
+            // Create the foreign toplevel handles
+            for instance in comp.shell.foreign_toplevel_instances.values() {
+                // Create all toplevel handle instances to ensure that extension protocols do not refer to handles
+                // that were not yet created.
+                if let Some(client) = instance.instance.client() {
+                    new_instances.push(toplevel.create_handle(
+                        comp.generation,
+                        &instance.instance,
+                        &comp.display,
+                        &client,
+                    ));
+                }
+            }
+
+            // Describe the toplevel.
+            for new in new_instances {
+                toplevel.initialize_handle(&new);
+            }
 
             return;
         }
@@ -243,25 +331,69 @@ impl Shell {
                 .iter()
                 .find_map(|(key, toplevel)| (toplevel.wl_surface().as_ref() == Some(surface)).then_some(*key))
             {
-                if let Some(toplevel) = comp.shell.toplevels.remove(&key) {
-                    // TODO: Tell ext-foreign-toplevel objects the surface is closed.
+                match comp.shell.toplevels.entry(key) {
+                    Entry::Occupied(toplevel) => {
+                        // If the surface was never mapped assume a second initial commit was sent and apply
+                        // the state.
+                        if !matches!(toplevel.get().current, State::NotYetMapped) {
+                            let toplevel = toplevel.remove();
 
-                    match toplevel.surface {
-                        Surface::Toplevel(surface) => comp.shell.pending_toplevels.push(surface),
-                        Surface::XWayland(_) => todo!("How to handle xwayland?"),
+                            // Notify clients the toplevel is being unmapped.
+                            for handle in toplevel.handles.iter() {
+                                handle.closed();
+                            }
+
+                            match toplevel.surface {
+                                Surface::Toplevel(surface) => comp.shell.pending_toplevels.push(surface),
+                                Surface::XWayland(_) => todo!("How to handle xwayland?"),
+                            }
+
+                            return;
+                        }
                     }
+
+                    Entry::Vacant(_) => unreachable!("initial commit must have occurred"),
                 }
             }
-
-            // Unmapped, propagate nothing more
-            return;
         }
 
-        // Apply updates to surface state
-        // TODO
+        if let Some(toplevel) = comp
+            .shell
+            .toplevels
+            .values()
+            .find(|toplevel| toplevel.wl_surface().as_ref() == Some(surface))
+        {
+            match &toplevel.surface {
+                Surface::Toplevel(toplevel) => {
+                    // Ensure the configure was acked before applying state.
+                    toplevel.ensure_configured();
+
+                    // TODO: Other stuff
+                }
+                Surface::XWayland(_) => todo!("how to handle xwayland"),
+            }
+        }
     }
 
-    pub fn destroyed(comp: &mut Aerugo, surface: &WlSurface) {}
+    pub fn remove_toplevel(comp: &mut Aerugo, surface: &WlSurface) {
+        // Remove toplevels that are pending
+        comp.shell
+            .pending_toplevels
+            .retain(|toplevel| toplevel.wl_surface() != surface);
+
+        if let Some(id) = comp.shell.toplevels.iter().find_map(|(key, toplevel)| {
+            let remove = toplevel.wl_surface().as_ref() == Some(surface);
+            remove.then_some(*key)
+        }) {
+            comp.shell.toplevels.remove(&id);
+        }
+    }
+
+    pub fn destroy_toplevel(comp: &mut Aerugo, id: ToplevelId) {
+        let _ = comp.shell.toplevels.remove(&id);
+
+        // TODO: Handle removal of pending toplevels.
+    }
 
     pub fn get_state(&self, id: ToplevelId) -> Option<&Toplevel> {
         self.toplevels.get(&id)

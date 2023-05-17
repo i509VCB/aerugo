@@ -7,7 +7,7 @@ use smithay::{
 };
 use wayland_server::protocol::{wl_output, wl_seat, wl_surface};
 
-use crate::Aerugo;
+use crate::{shell::Shell, Aerugo};
 
 impl XdgShellHandler for Aerugo {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -82,7 +82,9 @@ impl XdgShellHandler for Aerugo {
         // TODO: forward to wm
     }
 
-    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {}
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        Shell::remove_toplevel(self, surface.wl_surface());
+    }
 
     fn popup_destroyed(&mut self, _surface: PopupSurface) {
         // TODO: Handle popup death
