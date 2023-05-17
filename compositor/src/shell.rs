@@ -71,6 +71,7 @@ use std::{collections::hash_map::Entry, num::NonZeroU64};
 use rustc_hash::FxHashMap;
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Serial, Size},
     wayland::{
         compositor::{self, SurfaceAttributes, TraversalAction},
@@ -399,6 +400,39 @@ impl Shell {
                         let app_id = toplevel.app_id().unwrap_or_default();
                         tracing::warn!(%id, %app_id, "Killing client: toplevel not configured");
                     }
+
+                    // Verify the toplevel's state is correct if some states were configured.
+                    let current = surface.current_state();
+                    let states = &current.states;
+                    let _size = current.size;
+
+                    if states.contains(xdg_toplevel::State::Maximized) {
+                        // From xdg-shell:
+                        // > The window geometry specified in the configure event must be obeyed by the client
+                        //
+                        // TODO: Check window geometry and compare to the committed size.
+                    }
+
+                    if states.contains(xdg_toplevel::State::Fullscreen) {
+                        // From xdg-shell:
+                        // > The window geometry specified in the configure event is a maximum; the client
+                        // > cannot resize beyond it.
+                        //
+                        // This means the compositor can insert letterboxes if needed.
+                        //
+                        // TODO: Check that window geometry does not exceed the configured size.
+                    }
+
+                    if states.contains(xdg_toplevel::State::Resizing) {
+                        // From xdg-shell:
+                        // > The window geometry specified in the configure event is a maximum; the client
+                        // > cannot resize beyond it. Clients that have aspect ratio or cell sizing configuration
+                        // > can use a smaller size, however.
+                        //
+                        // TODO: Check that window geometry does not exceed the configured size.
+                    }
+
+                    // Activated and Tiled do not need to be checked here.
 
                     // TODO: Transaction setup
                     // FIXME: This is horrible.
