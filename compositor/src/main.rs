@@ -10,7 +10,7 @@ mod cli;
 fn main() {
     let _args = cli::AerugoArgs::parse();
     let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::TRACE.into())
+        .with_default_directive(LevelFilter::DEBUG.into())
         .from_env()
         .unwrap();
     let subscriber = FmtSubscriber::builder().with_env_filter(env_filter).finish();

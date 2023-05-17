@@ -274,16 +274,39 @@ impl Shell {
         {
             let toplevel = comp.shell.pending_toplevels.remove(toplevel_index);
 
+            // Query some info about the toplevel for logging.
+            let app_id = compositor::with_states(toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .app_id
+                    .clone()
+            })
+            .unwrap_or_default();
+
             // Ensure the toplevel has no attached buffer during initial commit
             if has_buffer {
+                tracing::warn!(%app_id, "Killing client: attached buffer during initial commit");
                 todo!("Either add XdgSurface to ToplevelSurface or search")
                 // TODO: Send UnconfiguredBuffer
             }
 
             // TODO: Remove this temporary configure and make the WM send the configure.
+            toplevel.with_pending_state(|state| {
+                // Set some size to make smithay and send a configure.
+                //
+                // FIXME: This seems broken as extension protocols have no way to force a configure to be sent.
+                state.size = Some((0, 0).into());
+            });
             toplevel.send_configure();
 
             let id = comp.shell.next_toplevel_id;
+
+            tracing::debug!(%id, %app_id, "Initial commit of toplevel");
+
             comp.shell.next_toplevel_id = comp
                 .shell
                 .next_toplevel_id
@@ -332,11 +355,15 @@ impl Shell {
                 .find_map(|(key, toplevel)| (toplevel.wl_surface().as_ref() == Some(surface)).then_some(*key))
             {
                 match comp.shell.toplevels.entry(key) {
-                    Entry::Occupied(toplevel) => {
+                    Entry::Occupied(entry) => {
                         // If the surface was never mapped assume a second initial commit was sent and apply
                         // the state.
-                        if !matches!(toplevel.get().current, State::NotYetMapped) {
-                            let toplevel = toplevel.remove();
+                        let toplevel = entry.get();
+
+                        if !matches!(toplevel.current, State::NotYetMapped) {
+                            // TODO: Include app_id, remove toplevel debug impl
+                            tracing::debug!(?toplevel, "Unmap toplevel");
+                            let toplevel = entry.remove();
 
                             // Notify clients the toplevel is being unmapped.
                             for handle in toplevel.handles.iter() {
@@ -364,9 +391,14 @@ impl Shell {
             .find(|toplevel| toplevel.wl_surface().as_ref() == Some(surface))
         {
             match &toplevel.surface {
-                Surface::Toplevel(toplevel) => {
+                Surface::Toplevel(surface) => {
                     // Ensure the configure was acked before applying state.
-                    toplevel.ensure_configured();
+                    // FIXME: winit (alacritty) does not like this and gets killed.
+                    if !surface.ensure_configured() {
+                        let id = toplevel.id;
+                        let app_id = toplevel.app_id().unwrap_or_default();
+                        tracing::warn!(%id, %app_id, "Killing client: toplevel not configured");
+                    }
 
                     // TODO: Other stuff
                 }
@@ -385,14 +417,10 @@ impl Shell {
             let remove = toplevel.wl_surface().as_ref() == Some(surface);
             remove.then_some(*key)
         }) {
-            comp.shell.toplevels.remove(&id);
+            let toplevel = comp.shell.toplevels.remove(&id).unwrap();
+            let app_id = toplevel.app_id();
+            tracing::debug!(id, app_id, "Removed toplevel");
         }
-    }
-
-    pub fn destroy_toplevel(comp: &mut Aerugo, id: ToplevelId) {
-        let _ = comp.shell.toplevels.remove(&id);
-
-        // TODO: Handle removal of pending toplevels.
     }
 
     pub fn get_state(&self, id: ToplevelId) -> Option<&Toplevel> {
