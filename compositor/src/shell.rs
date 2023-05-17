@@ -393,7 +393,6 @@ impl Shell {
             match &toplevel.surface {
                 Surface::Toplevel(surface) => {
                     // Ensure the configure was acked before applying state.
-                    // FIXME: winit (alacritty) does not like this and gets killed.
                     if !surface.ensure_configured() {
                         let id = toplevel.id;
                         let app_id = toplevel.app_id().unwrap_or_default();
