@@ -73,7 +73,7 @@ use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
     utils::{Logical, Serial, Size},
     wayland::{
-        compositor,
+        compositor::{self, SurfaceAttributes, TraversalAction},
         shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData},
     },
     xwayland::X11Surface,
@@ -81,6 +81,7 @@ use smithay::{
 use wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Client, DisplayHandle, Resource};
 
 use crate::{
+    scene::NodeIndex,
     wayland::protocols::{
         ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
         ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
@@ -399,7 +400,11 @@ impl Shell {
                         tracing::warn!(%id, %app_id, "Killing client: toplevel not configured");
                     }
 
-                    // TODO: Other stuff
+                    // TODO: Transaction setup
+                    // FIXME: This is horrible.
+                    let tree = comp.scene.create_surface_tree(surface.wl_surface().clone());
+                    comp.scene.set_output_node(&comp.output, NodeIndex::SurfaceTree(tree));
+                    send_frames_surface_tree(surface.wl_surface(), 0);
                 }
                 Surface::XWayland(_) => todo!("how to handle xwayland"),
             }
@@ -429,4 +434,25 @@ impl Shell {
     pub fn get_state_mut(&mut self, id: ToplevelId) -> Option<&mut Toplevel> {
         self.toplevels.get_mut(&id)
     }
+}
+
+pub fn send_frames_surface_tree(surface: &WlSurface, time: u32) {
+    compositor::with_surface_tree_downward(
+        surface,
+        (),
+        |_, _, &()| TraversalAction::DoChildren(()),
+        |_surf, states, &()| {
+            // the surface may not have any user_data if it is a subsurface and has not
+            // yet been commited
+            for callback in states
+                .cached_state
+                .current::<SurfaceAttributes>()
+                .frame_callbacks
+                .drain(..)
+            {
+                callback.done(time);
+            }
+        },
+        |_, _, &()| true,
+    );
 }

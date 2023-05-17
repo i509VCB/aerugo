@@ -445,9 +445,9 @@ where
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
+        _location: Point<i32, Physical>,
+        _scale: Scale<f64>,
+        _alpha: f32,
     ) -> Vec<C> {
         let Some(iter) = self.scene.forest.dfs_descend(self.root.into()) else {
             return Vec::new();
