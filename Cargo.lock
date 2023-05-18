@@ -24,6 +24,11 @@ dependencies = [
 [[package]]
 name = "aerugo-wm"
 version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "wayland-client",
+ "wayland-scanner",
+]
 
 [[package]]
 name = "appendlist"
@@ -1125,6 +1130,18 @@ dependencies = [
  "scoped-tls",
  "smallvec",
  "wayland-sys",
+]
+
+[[package]]
+name = "wayland-client"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bde68449abab1a808e5227b6e295f4ae3680911eb7711b4a2cb90141edb780"
+dependencies = [
+ "bitflags 1.3.2",
+ "nix 0.26.2",
+ "wayland-backend",
+ "wayland-scanner",
 ]
 
 [[package]]

@@ -27,11 +27,11 @@ mod generated {
 
     pub mod __interfaces {
         use smithay::reexports::wayland_server::backend as wayland_backend;
-        wayland_scanner::generate_interfaces!("protocols/ext-foreign-toplevel-list-v1.xml");
+        wayland_scanner::generate_interfaces!("../protocols/ext-foreign-toplevel-list-v1.xml");
     }
     use self::__interfaces::*;
 
-    wayland_scanner::generate_server_code!("protocols/ext-foreign-toplevel-list-v1.xml");
+    wayland_scanner::generate_server_code!("../protocols/ext-foreign-toplevel-list-v1.xml");
 }
 
 impl GlobalDispatch<ExtForeignToplevelListV1, ()> for Aerugo {

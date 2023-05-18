@@ -219,6 +219,10 @@ impl Toplevel {
         }
     }
 
+    pub fn update_state(&mut self) {
+        todo!()
+    }
+
     pub fn remove_handle(&mut self, id: ObjectId) {
         if let Some(index) = self.handles.iter().position(|handle| handle.id() == id) {
             self.handles.remove(index);
@@ -234,12 +238,7 @@ enum State {
     NotYetMapped,
 
     /// The toplevel is currently mapped.
-    Mapped {
-        /// The state of the toplevel.
-        state: Mapped,
-        /// The identifier.
-        identifier: String,
-    },
+    Mapped(Mapped),
 }
 
 /// The state of a mapped toplevel.
@@ -389,7 +388,7 @@ impl Shell {
         if let Some(toplevel) = comp
             .shell
             .toplevels
-            .values()
+            .values_mut()
             .find(|toplevel| toplevel.wl_surface().as_ref() == Some(surface))
         {
             match &toplevel.surface {
