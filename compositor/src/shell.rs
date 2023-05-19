@@ -83,7 +83,7 @@ use wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Client,
 
 use crate::{
     scene::NodeIndex,
-    wayland::protocols::{
+    wayland::ext::foreign_toplevel::{
         ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
         ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
     },

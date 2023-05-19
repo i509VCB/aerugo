@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="aerugo_wm_v1">
+  <!-- TODO: Copyright -->
+
+  <interface name="aerugo_wm_v1" version="1">
+    <description>
+      The global interface for window management in a compositor.
+    </description>
+
+    <enum name="error">
+      <entry name="already_constructed" value="0"
+             summary="the global has already been constructed for this client"/>
+
+      <entry name="dead_wm" value="1"
+             summary="a protocol object was used when the wm is finished"/>
+
+      <entry name="defunct_objects" value="2"
+             summary="a child protocol object was used when the wm is finished"/>
+
+      <entry name="unresponsive" value="3"
+             summary="the wm did not respond to a ping event in time"/>
+
+      <entry name="already_extended" value="4"
+             summary="a ext_foreign_toplevel_handle_v1 already has an instance of a aerugo_wm_toplevel_v1"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_v1 object">
+        Destroys the aerugo_wm_v1 object.
+
+        When the destructor is invoked, all child objects become inert.
+      </description>
+    </request>
+
+    <request name="pong">
+      <description>
+        The WM must respond to a ping event with a pong request or the WM may be deemed unresponsive.
+
+        See aerugo_wm_v1.ping and aerugo_wm_v1.error.unresponsive for more information.
+      </description>
+      <arg name="serial" type="uint" summary="serial of the ping event"/>
+    </request>
+
+    <request name="get_wm_toplevel">
+      <description>
+        Creates the aerugo_wm_toplevel_v1 object for the ext_foreign_toplevel_handle_v1 instance.
+
+        It is illegal to create more than one aerugo_wm_toplevel_v1 per ext_foreign_toplevel_handle_v1 object.
+        Otherwise a aerugo_wm_v1.error.already_extended error is sent.
+      </description>
+      <arg name="handle" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_toplevel_v1"/>
+    </request>
+
+    <event name="ping">
+      <description>
+        The ping event asks if the wm is still alive. The serial in this event must be passed back in the "pong"
+        event in some amount of time to be kept alive.
+
+        If the wm is unresponsive, the server may decide when the wm is considered dead and disconnected.
+
+        See aerugo_wm_v1.ping and aerugo_wm_v1.error.unresponsive for more information.
+      </description>
+      <arg name="serial" type="uint" summary="serial of the ping event"/>
+    </event>
+  </interface>
+
+  <interface name="aerugo_wm_toplevel_v1" version="1">
+    <description>
+      This interface extends the ext_foreign_toplevel_handle_v1 interface, providing functionality to configure
+      the state of a toplevel.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_toplevel_v1 object">
+        Destroys the aerugo_wm_toplevel_v1 object.
+
+        <!-- TODO: Error for destroying before the toplevel handle -->
+      </description>
+    </request>
+  </interface>
+</protocol>

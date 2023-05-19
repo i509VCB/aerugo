@@ -19,8 +19,14 @@ use wayland_server::{
 };
 
 use crate::{
-    backend::Backend, scene::Scene, shell::Shell,
-    wayland::protocols::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1, Loop,
+    backend::Backend,
+    scene::Scene,
+    shell::Shell,
+    wayland::{
+        aerugo_wm::aerugo_wm_v1::AerugoWmV1,
+        ext::foreign_toplevel::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
+    },
+    Loop,
 };
 
 #[derive(Debug)]
@@ -44,6 +50,7 @@ impl Aerugo {
         let wl_compositor = CompositorState::new::<Self>(&display);
         let xdg_shell = XdgShellState::new::<Self>(&display);
         let _foreign_toplevel_list = display.create_global::<Self, ExtForeignToplevelListV1, _>(1, ());
+        let _aerugo_wm = display.create_global::<Self, AerugoWmV1, _>(1, ());
         let output = Output::new(
             "Test output".into(),
             PhysicalProperties {

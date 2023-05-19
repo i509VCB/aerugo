@@ -7,7 +7,6 @@
 // and avoid exposing internal details.
 //
 // You can use all the types from my_protocol as if they went from `wayland_client::protocol`.
-pub use generated::{ext_foreign_toplevel_handle_v1, ext_foreign_toplevel_list_v1};
 use wayland_server::{
     backend::{ClientId, ObjectId},
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
@@ -22,17 +21,15 @@ use self::{
     ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1, ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
 };
 
-mod generated {
-    use smithay::reexports::wayland_server;
+use smithay::reexports::wayland_server;
 
-    pub mod __interfaces {
-        use smithay::reexports::wayland_server::backend as wayland_backend;
-        wayland_scanner::generate_interfaces!("../protocols/ext-foreign-toplevel-list-v1.xml");
-    }
-    use self::__interfaces::*;
-
-    wayland_scanner::generate_server_code!("../protocols/ext-foreign-toplevel-list-v1.xml");
+pub mod __interfaces {
+    use smithay::reexports::wayland_server::backend as wayland_backend;
+    wayland_scanner::generate_interfaces!("../protocols/ext-foreign-toplevel-list-v1.xml");
 }
+use self::__interfaces::*;
+
+wayland_scanner::generate_server_code!("../protocols/ext-foreign-toplevel-list-v1.xml");
 
 impl GlobalDispatch<ExtForeignToplevelListV1, ()> for Aerugo {
     fn bind(
@@ -41,9 +38,9 @@ impl GlobalDispatch<ExtForeignToplevelListV1, ()> for Aerugo {
         client: &Client,
         resource: New<ExtForeignToplevelListV1>,
         _global_data: &(),
-        data_init: &mut DataInit<'_, Self>,
+        init: &mut DataInit<'_, Self>,
     ) {
-        let instance = data_init.init(resource, ());
+        let instance = init.init(resource, ());
         let instance = state
             .shell
             .foreign_toplevel_instances
@@ -83,9 +80,9 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for Aerugo {
         _client: &Client,
         resource: &ExtForeignToplevelListV1,
         request: ext_foreign_toplevel_list_v1::Request,
-        _data: &(),
+        _: &(),
         _display: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
+        _init: &mut DataInit<'_, Self>,
     ) {
         // in tree generated protocol
         #[allow(unreachable_patterns)]
@@ -116,9 +113,9 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
         _client: &Client,
         resource: &ExtForeignToplevelHandleV1,
         request: ext_foreign_toplevel_handle_v1::Request,
-        _data: &ToplevelId,
+        _id: &ToplevelId,
         _display: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
+        _init: &mut DataInit<'_, Self>,
     ) {
         // in tree generated protocol
         #[allow(unreachable_patterns)]

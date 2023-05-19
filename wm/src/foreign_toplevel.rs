@@ -37,13 +37,17 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
         event: ext_foreign_toplevel_list_v1::Event,
         _: &(),
         _conn: &Connection,
-        _queue: &QueueHandle<Self>,
+        queue: &QueueHandle<Self>,
     ) {
         use ext_foreign_toplevel_list_v1::Event;
 
         match event {
             Event::Toplevel { toplevel } => {
                 let id = *toplevel.data::<NonZeroU64>().unwrap();
+
+                // Initialize extension objects
+                let wm_toplevel = state.aerugo_wm_v1.get_wm_toplevel(&toplevel, queue, id);
+
                 state.toplevels.insert(
                     id,
                     Toplevel {
@@ -54,6 +58,7 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
                         },
                         pending: None,
                         handle: toplevel,
+                        wm_toplevel,
                     },
                 );
             }
@@ -84,6 +89,8 @@ impl Dispatch<ExtForeignToplevelHandleV1, NonZeroU64> for State {
         match event {
             Event::Closed => {
                 // TODO: Forward closed instead of just removing
+                toplevel.wm_toplevel.destroy();
+                toplevel.handle.destroy();
                 state.toplevels.remove(id);
             }
             Event::Done => {

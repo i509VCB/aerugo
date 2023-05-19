@@ -26,6 +26,8 @@ name = "aerugo-wm"
 version = "0.1.0"
 dependencies = [
  "once_cell",
+ "tracing",
+ "tracing-subscriber",
  "wayland-client",
  "wayland-scanner",
 ]
