@@ -14,6 +14,7 @@ use wayland_server::{
 
 use crate::{
     shell::{ForeignToplevelInstance, ToplevelId},
+    wayland::aerugo_wm::aerugo_wm_toplevel_v1,
     Aerugo, ClientData, PrivilegedGlobals,
 };
 
@@ -113,7 +114,7 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
         _client: &Client,
         resource: &ExtForeignToplevelHandleV1,
         request: ext_foreign_toplevel_handle_v1::Request,
-        _id: &ToplevelId,
+        id: &ToplevelId,
         _display: &DisplayHandle,
         _init: &mut DataInit<'_, Self>,
     ) {
@@ -122,9 +123,16 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
         match request {
             ext_foreign_toplevel_handle_v1::Request::Destroy => {
                 // TODO: Check for invalid destruction order in extension protocols.
-                let Some(_instance) = state.shell.foreign_toplevel_instances.get(&resource.id()) else {
-                    return;
-                };
+                if let Some(toplevel) = state.shell.toplevels.get_mut(id) {
+                    if let Some(handles) = toplevel.get_handles(resource.id()) {
+                        if let Some(ref aerugo_toplevel) = handles.aerugo_toplevel {
+                            aerugo_toplevel.post_error(
+                                aerugo_wm_toplevel_v1::Error::DefunctObject,
+                                "Foreign toplevel handle was destroyed before it's extending aerugo_wm_toplevel_v1 object"
+                            );
+                        }
+                    }
+                }
             }
 
             _ => unreachable!(),

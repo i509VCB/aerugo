@@ -71,11 +71,17 @@
       the state of a toplevel.
     </description>
 
+    <enum name="error">
+      <entry name="defunct_object" value="0"
+             summary="the toplevel handle was destroyed before it's aerugo_wm_toplevel_v1 object"/>
+    </enum>
+
     <request name="destroy" type="destructor">
       <description summary="destroy the aerugo_wm_toplevel_v1 object">
         Destroys the aerugo_wm_toplevel_v1 object.
 
-        <!-- TODO: Error for destroying before the toplevel handle -->
+        It is illegal to destroy the ext_foreign_toplevel_handle_v1 object the aerugo_wm_toplevel_v1 object
+        was created from. Otherwise a aerugo_wm_toplevel_v1.error.defunct_object error is sent.
       </description>
     </request>
   </interface>

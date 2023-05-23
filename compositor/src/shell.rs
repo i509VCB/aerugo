@@ -83,9 +83,12 @@ use wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Client,
 
 use crate::{
     scene::NodeIndex,
-    wayland::ext::foreign_toplevel::{
-        ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
-        ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
+    wayland::{
+        aerugo_wm::aerugo_wm_toplevel_v1::AerugoWmToplevelV1,
+        ext::foreign_toplevel::{
+            ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
+            ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
+        },
     },
     Aerugo,
 };
@@ -138,8 +141,14 @@ pub struct Toplevel {
     pending: Option<Mapped>,
 
     /// Foreign handles to this toplevel.
-    handles: Vec<ExtForeignToplevelHandleV1>,
+    handles: FxHashMap<ObjectId, ToplevelHandles>,
     // TODO: xdg-foreign id?
+}
+
+#[derive(Debug)]
+pub struct ToplevelHandles {
+    pub handle: ExtForeignToplevelHandleV1,
+    pub aerugo_toplevel: Option<AerugoWmToplevelV1>,
 }
 
 pub type ToplevelId = NonZeroU64;
@@ -161,7 +170,13 @@ impl Toplevel {
             .unwrap();
         instance.toplevel(&handle);
         handle.identifier(identifier.into());
-        self.handles.push(handle.clone());
+        self.handles.insert(
+            handle.id(),
+            ToplevelHandles {
+                handle: handle.clone(),
+                aerugo_toplevel: None,
+            },
+        );
         // Defer sending other information about the toplevel handles.
         handle
     }
@@ -224,9 +239,11 @@ impl Toplevel {
     }
 
     pub fn remove_handle(&mut self, id: ObjectId) {
-        if let Some(index) = self.handles.iter().position(|handle| handle.id() == id) {
-            self.handles.remove(index);
-        }
+        let _ = self.handles.remove(&id);
+    }
+
+    pub fn get_handles(&mut self, id: ObjectId) -> Option<&mut ToplevelHandles> {
+        self.handles.get_mut(&id)
     }
 }
 
@@ -319,7 +336,7 @@ impl Shell {
                 surface: Surface::Toplevel(toplevel),
                 current: State::default(),
                 pending: None,
-                handles: Vec::new(),
+                handles: FxHashMap::default(),
             });
 
             let mut new_instances = Vec::with_capacity(comp.shell.foreign_toplevel_instances.len());
@@ -367,8 +384,8 @@ impl Shell {
                             let toplevel = entry.remove();
 
                             // Notify clients the toplevel is being unmapped.
-                            for handle in toplevel.handles.iter() {
-                                handle.closed();
+                            for handle in toplevel.handles.values() {
+                                handle.handle.closed();
                             }
 
                             match toplevel.surface {

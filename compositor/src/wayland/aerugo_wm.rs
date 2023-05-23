@@ -48,7 +48,16 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
             Request::GetWmToplevel { handle, id } => {
                 let toplevel_id = *handle.data::<ToplevelId>().unwrap();
 
-                // TODO: Ensure only one instance exists.
+                let toplevel = state.shell.toplevels.get_mut(&toplevel_id).unwrap();
+                let handles = toplevel.get_handles(handle.id()).unwrap();
+
+                if handles.aerugo_toplevel.is_some() {
+                    resource.post_error(
+                        aerugo_wm_v1::Error::AlreadyExtended,
+                        "Already extended foreign toplevel handle with aerugo_wm_toplevel_v1",
+                    );
+                }
+
                 let _wm_toplevel = init.init(id, toplevel_id);
             }
         }
