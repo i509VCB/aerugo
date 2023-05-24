@@ -98,6 +98,13 @@
       <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
     </request>
 
+    <request name="create_configure">
+      <description>
+        Create a configure describing the state of a toplevel.
+      </description>
+      <arg name="id" type="new_id" interface="aerugo_wm_configure_v1"/>
+    </request>
+
     <event name="ping">
       <description>
         The ping event asks if the wm is still alive. The serial in this event must be passed back in the "pong"
@@ -123,6 +130,50 @@
              summary="the toplevel handle was destroyed before it's aerugo_wm_toplevel_v1 object"/>
     </enum>
 
+    <enum name="capabilities">
+      <description>
+        Describes the capabilities of a toplevel.
+
+        This is used to test if the toplevel supports optional features.
+      </description>
+
+      <entry name="server_side_decorations" value="0"
+             summary="whether the toplevel can be decorated by the server"/>
+
+      <entry name="tiled_states" value="1"
+             summary="whether the tiled states are supported"/>
+    </enum>
+
+    <enum name="wm_capabilities">
+      <description>
+        Capabilities supported by the WM.
+
+        This can be used to tell clients that a WM might not support features such as minimize.
+      </description>
+
+      <entry name="window_menu" value="0" summary="show_window_menu is available"/>
+      <entry name="maximize" value="1" summary="set_maximized and unset_maximized are available"/>
+      <entry name="fullscreen" value="2" summary="set_fullscreen and unset_fullscreen are available"/>
+      <entry name="minimize" value="3" summary="set_minimized is available"/>
+    </enum>
+
+    <enum name="state">
+      <description>
+        Types of state on the toplevel.
+
+        TODO: Copy enum docs from xdg-shell
+      </description>
+
+      <entry name="maximized" value="0"/>
+      <entry name="fullscreen" value="1"/>
+      <entry name="resizing" value="2"/>
+      <entry name="activated" value="3"/>
+      <entry name="tiled_left" value="4"/>
+      <entry name="tiled_right" value="5"/>
+      <entry name="tiled_top" value="6"/>
+      <entry name="tiled_bottom" value="7"/>
+    </enum>
+
     <request name="destroy" type="destructor">
       <description summary="destroy the aerugo_wm_toplevel_v1 object">
         Destroys the aerugo_wm_toplevel_v1 object.
@@ -131,6 +182,78 @@
         was created from. Otherwise a aerugo_wm_toplevel_v1.error.defunct_object error is sent.
       </description>
     </request>
+
+    <event name="capabilities">
+      <description>
+        This event describes the capabilities of a surface.
+
+        The capabilities are sent as an array of 32-bit unsigned integers in native endianness.
+
+        The capabilities must not be applied immediately. See ext_foreign_toplevel_handle_v1.done for details.
+      </description>
+      <arg name="capabilities" type="array" summary="the capabilities of the surface"/>
+    </event>
+
+    <event name="min_size">
+      <description>
+        The toplevel suggested minimum size.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
+
+    <event name="max_size">
+      <description>
+        The toplevel suggested maximum size.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
+
+    <event name="request_set_minimized">
+      <description>
+        The toplevel requested to be minimized.
+      </description>
+    </event>
+
+    <event name="request_set_maximized">
+      <description>
+        The toplevel requested to be maximized.
+      </description>
+    </event>
+
+    <event name="request_unset_maximized">
+      <description>
+        The toplevel requested to be unmaximized.
+      </description>
+    </event>
+
+    <event name="request_set_fullscreen">
+      <description>
+        The toplevel requested to be fullscreened.
+      </description>
+    </event>
+
+    <event name="request_unset_fullscreen">
+      <description>
+        The toplevel requested to be unfullscreened.
+      </description>
+    </event>
+
+    <event name="show_window_menu">
+      <description>
+        The toplevel requested the WM show the window menu.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+    </event>
+
+    <!-- TODO: Set parent -->
+
+    <!-- TODO: Title, App id -->
+
+    <!-- TODO: Mirrors of move and resize -->
   </interface>
 
   <interface name="aerugo_wm_surface_v1" version="1">
@@ -282,6 +405,15 @@
       <description summary="destroy the aerugo_wm_configure_v1 object">
         Destroys the aerugo_wm_configure_v1 object.
       </description>
+    </request>
+
+    <request name="states">
+      <description>
+        Describes the states to configure for the toplevel.
+
+        The states are sent as an array of 32-bit unsigned integers in native endianness.
+      </description>
+      <arg name="states" type="array" summary="array of states"/>
     </request>
   </interface>
 </protocol>

@@ -69,6 +69,7 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
             Request::GetWmSurface { surface: _, id: _ } => todo!(),
             Request::GetToplevelNode { toplevel: _, id: _ } => todo!(),
             Request::GetSurfaceNode { surface: _, id: _ } => todo!(),
+            Request::CreateConfigure { id: _ } => todo!(),
         }
     }
 
@@ -181,6 +182,7 @@ impl Dispatch<AerugoWmConfigureV1, ()> for Aerugo {
 
         match request {
             Request::Destroy => todo!(),
+            Request::States { states: _ } => todo!(),
         }
     }
 }

@@ -57,7 +57,19 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
         _conn: &Connection,
         _queue: &QueueHandle<Self>,
     ) {
-        match event {}
+        use aerugo_wm_toplevel_v1::Event;
+
+        match event {
+            Event::Capabilities { capabilities: _ } => todo!(),
+            Event::MinSize { width: _, height: _ } => todo!(),
+            Event::MaxSize { width: _, height: _ } => todo!(),
+            Event::RequestSetMinimized => todo!(),
+            Event::RequestSetMaximized => todo!(),
+            Event::RequestUnsetMaximized => todo!(),
+            Event::RequestSetFullscreen => todo!(),
+            Event::RequestUnsetFullscreen => todo!(),
+            Event::ShowWindowMenu { seat: _, x: _, y: _ } => todo!(),
+        }
     }
 }
 
