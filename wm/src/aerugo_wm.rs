@@ -5,7 +5,10 @@ use wayland_client::{Connection, Dispatch, QueueHandle};
 use crate::State;
 
 use self::protocol::{
+    aerugo_wm_node_v1::{self, AerugoWmNodeV1},
+    aerugo_wm_surface_v1::{self, AerugoWmSurfaceV1},
     aerugo_wm_toplevel_v1::{self, AerugoWmToplevelV1},
+    aerugo_wm_transaction_v1::{self, AerugoWmTransactionV1},
     aerugo_wm_v1::{self, AerugoWmV1},
 };
 
@@ -15,10 +18,12 @@ pub mod protocol {
     pub mod __interfaces {
         use crate::foreign_toplevel::protocol::__interfaces::*;
         use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
         wayland_scanner::generate_interfaces!("../protocols/aerugo-wm-v1.xml");
     }
     use self::__interfaces::*;
     use crate::foreign_toplevel::protocol::*;
+    use wayland_client::protocol::*;
 
     wayland_scanner::generate_client_code!("../protocols/aerugo-wm-v1.xml");
 }
@@ -53,5 +58,52 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
         _queue: &QueueHandle<Self>,
     ) {
         match event {}
+    }
+}
+
+// TODO: User data for surface?
+impl Dispatch<AerugoWmSurfaceV1, ()> for State {
+    fn event(
+        _state: &mut Self,
+        _proxy: &AerugoWmSurfaceV1,
+        event: aerugo_wm_surface_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _queue: &QueueHandle<Self>,
+    ) {
+        match event {}
+    }
+}
+
+// TODO: User data for node?
+impl Dispatch<AerugoWmNodeV1, ()> for State {
+    fn event(
+        _state: &mut Self,
+        _proxy: &AerugoWmNodeV1,
+        event: aerugo_wm_node_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _queue: &QueueHandle<Self>,
+    ) {
+        match event {}
+    }
+}
+
+// TODO: User data for transaction?
+impl Dispatch<AerugoWmTransactionV1, ()> for State {
+    fn event(
+        _state: &mut Self,
+        _proxy: &AerugoWmTransactionV1,
+        event: aerugo_wm_transaction_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _queue: &QueueHandle<Self>,
+    ) {
+        use aerugo_wm_transaction_v1::Event;
+
+        match event {
+            Event::Applied => todo!(),
+            Event::Failed => todo!(),
+        }
     }
 }

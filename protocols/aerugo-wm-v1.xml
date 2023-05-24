@@ -78,6 +78,26 @@
       <arg name="id" type="new_id" interface="aerugo_wm_surface_v1"/>
     </request>
 
+    <request name="get_toplevel_node">
+      <description>
+        Create a node referencing the toplevel.
+
+        Multiple nodes can exist that reference the same toplevel.
+      </description>
+      <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
+    </request>
+
+    <request name="get_surface_node">
+      <description>
+        Create a node referencing a surface.
+
+        Multiple nodes can exist that reference the same surface.
+      </description>
+      <arg name="surface" type="object" interface="aerugo_wm_surface_v1"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
+    </request>
+
     <event name="ping">
       <description>
         The ping event asks if the wm is still alive. The serial in this event must be passed back in the "pong"
@@ -141,6 +161,126 @@
         Destroys the aerugo_wm_node_v1 object.
 
         TODO: Add behavior where destroying the underlying object before the node is illegal.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="aerugo_wm_transaction_v1" version="1">
+    <description>
+      A transaction describes a set of toplevel state and graph updates that are atomically applied.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_transaction_v1 object">
+        Destroys the aerugo_wm_transaction_v1 object.
+
+        TODO: What semantics should this have?
+      </description>
+    </request>
+
+    <request name="dependency">
+      <description>
+        Adds a dependency on another transaction. The dependency must complete before this transaction is
+        completed.
+
+        This allows a set of atomic operations to depend on each other.
+
+        A WM must not cause dependency cycles or cause a transaction to depend on itself. (TODO: protocol
+        error for this).
+      </description>
+      <arg name="dependency" type="object" interface="aerugo_wm_transaction_v1"/>
+    </request>
+
+    <request name="configure">
+      <description>
+        Add a dependency on a configure being applied. This can be used to ensure the state of a toplevel is
+        updated before applying a graph update.
+      </description>
+      <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1"
+           summary="the toplevel to configure"/>
+      <arg name="configure" type="object" interface="aerugo_wm_configure_v1"
+           summary="the configure to apply to the toplevel"/>
+    </request>
+
+    <request name="move">
+      <description>
+        Move a node relative to the parent when a transaction has completed.
+
+        If no offset is specified, the node is assumed to have an offset of 0 px in the x and y position.
+
+        The move will not be applied until the transaction is completed.
+      </description>
+      <arg name="node" type="object" interface="aerugo_wm_node_v1" summary="the node to move relative to the parent"/>
+      <arg name="offset_x" type="int" summary="x offset from the parent in pixels"/>
+      <arg name="offset_y" type="int" summary="y offset from the parent in pixels"/>
+    </request>
+
+    <request name="set_output_node">
+      <description>
+        Set the node that should be presented to an output.
+
+        The offset of the node is relative to the origin of the output. A NULL node can be set not present a
+        node to the output.
+
+        This will not be applied until the transaction is completed.
+      </description>
+      <arg name="output" type="object" interface="wl_output" summary="the output to present to"/>
+      <arg name="node" type="object" allow_null="true" interface="aerugo_wm_node_v1"
+           summary="the node to present to an output"/>
+    </request>
+
+    <!-- TODO: Node relations -->
+  
+    <request name="submit">
+      <description>
+        Queue the transaction to be applied.
+
+        The dependency transactions must be submitted before this transaction.
+
+        At some time in the future either a aerugo_wm_transaction_v1.applied or aerugo_wm_transaction_v1.failed
+        event will be handled by the client to indicate when the transaction has been applied or failed to apply.
+      </description>
+    </request>
+
+    <request name="cancel">
+      <description>
+        Cancel an active transaction.
+
+        When a transaction is cancelled, the transaction will be sent a aerugo_wm_transaction_v1.failed event
+        and any other transactions depending on that transaction.
+
+        A client must only cancel a transaction after it was submitted. Otherwise a protocol error occurs
+        (TODO: what error)
+      </description>
+    </request>
+
+    <event name="applied">
+      <description>
+        The transaction has completed and all updates to the state have been applied.
+
+        The client can destroy the aerugo_wm_transaction_v1 object.
+      </description>
+    </event>
+
+    <event name="failed">
+      <description>
+        The transaction failed. (TODO: Describe why could a transaction fail?)
+      </description>
+    </event>
+  </interface>
+
+  <interface name="aerugo_wm_configure_v1" version="1">
+    <description>
+      This interface describes a configure for a aerugo_wm_toplevel_v1.
+
+      A configure describes the state a window must conform to. This interface heavily mirrors the configure
+      used in the xdg-shell protocol and exposes a few other properties in other protocols such as
+      xdg-decoration.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_configure_v1 object">
+        Destroys the aerugo_wm_configure_v1 object.
       </description>
     </request>
   </interface>

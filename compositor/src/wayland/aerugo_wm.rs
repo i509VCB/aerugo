@@ -10,7 +10,11 @@ pub mod __interfaces {
     use smithay::reexports::wayland_server::protocol::__interfaces::*;
     wayland_scanner::generate_interfaces!("../protocols/aerugo-wm-v1.xml");
 }
-use self::{__interfaces::*, aerugo_wm_toplevel_v1::AerugoWmToplevelV1, aerugo_wm_v1::AerugoWmV1};
+use self::{
+    __interfaces::*, aerugo_wm_configure_v1::AerugoWmConfigureV1, aerugo_wm_node_v1::AerugoWmNodeV1,
+    aerugo_wm_surface_v1::AerugoWmSurfaceV1, aerugo_wm_toplevel_v1::AerugoWmToplevelV1,
+    aerugo_wm_transaction_v1::AerugoWmTransactionV1, aerugo_wm_v1::AerugoWmV1,
+};
 use wayland_server::protocol::*;
 
 use crate::{shell::ToplevelId, wayland::ext::foreign_toplevel::*, Aerugo};
@@ -33,11 +37,11 @@ impl GlobalDispatch<AerugoWmV1, ()> for Aerugo {
 impl Dispatch<AerugoWmV1, ()> for Aerugo {
     fn request(
         state: &mut Self,
-        client: &Client,
+        _client: &Client,
         resource: &AerugoWmV1,
         request: aerugo_wm_v1::Request,
         _: &(),
-        display: &DisplayHandle,
+        _display: &DisplayHandle,
         init: &mut DataInit<'_, Self>,
     ) {
         use aerugo_wm_v1::Request;
@@ -63,6 +67,8 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
                 let _wm_toplevel = init.init(id, toplevel_id);
             }
             Request::GetWmSurface { surface: _, id: _ } => todo!(),
+            Request::GetToplevelNode { toplevel: _, id: _ } => todo!(),
+            Request::GetSurfaceNode { surface: _, id: _ } => todo!(),
         }
     }
 
@@ -89,4 +95,92 @@ impl Dispatch<AerugoWmToplevelV1, ToplevelId> for Aerugo {
     }
 
     fn destroyed(_state: &mut Self, _client: ClientId, _resource: ObjectId, _data: &ToplevelId) {}
+}
+
+impl Dispatch<AerugoWmSurfaceV1, ToplevelId> for Aerugo {
+    fn request(
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &AerugoWmSurfaceV1,
+        request: aerugo_wm_surface_v1::Request,
+        _data: &ToplevelId,
+        _display: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
+    ) {
+        use aerugo_wm_surface_v1::Request;
+
+        match request {
+            Request::Destroy => todo!(),
+        }
+    }
+}
+
+// TODO: User data for node
+impl Dispatch<AerugoWmNodeV1, ()> for Aerugo {
+    fn request(
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &AerugoWmNodeV1,
+        request: aerugo_wm_node_v1::Request,
+        _data: &(),
+        _display: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
+    ) {
+        use aerugo_wm_node_v1::Request;
+
+        match request {
+            Request::Destroy => todo!(),
+        }
+    }
+}
+
+// TODO: User data for transaction?
+impl Dispatch<AerugoWmTransactionV1, ()> for Aerugo {
+    fn request(
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &AerugoWmTransactionV1,
+        request: aerugo_wm_transaction_v1::Request,
+        _data: &(),
+        _display: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
+    ) {
+        use aerugo_wm_transaction_v1::Request;
+
+        match request {
+            Request::Destroy => todo!(),
+            Request::Dependency { dependency: _ } => todo!(),
+            Request::Configure {
+                toplevel: _,
+                configure: _,
+            } => todo!(),
+            Request::Move {
+                node: _,
+                offset_x: _,
+                offset_y: _,
+            } => todo!(),
+            Request::SetOutputNode { output: _, node: _ } => todo!(),
+            Request::Submit => todo!(),
+            Request::Cancel => todo!(),
+        }
+    }
+}
+
+// TODO: User data for configure?
+impl Dispatch<AerugoWmConfigureV1, ()> for Aerugo {
+    fn request(
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &AerugoWmConfigureV1,
+        request: aerugo_wm_configure_v1::Request,
+        _data: &(),
+        _display: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
+    ) {
+        use aerugo_wm_configure_v1::Request;
+
+        match request {
+            Request::Destroy => todo!(),
+        }
+    }
 }
