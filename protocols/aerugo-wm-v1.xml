@@ -2,6 +2,24 @@
 <protocol name="aerugo_wm_v1">
   <!-- TODO: Copyright -->
 
+  <description>
+    The aerugo window management protocol provides a way for a special window management (WM) client to act as
+    a window manager.
+
+    At a high level this protocol takes a list of toplevels, configures the toplevel and then describes where
+    the toplevel should be placed in a 2D coordinate space.
+
+    The WM starts by creating a scene graph. A scene graph declaratively describes a tree of nodes. A node in
+    this context is either a toplevel or a surface created by the WM. One use case for surfaces created by the
+    WM is implementing server side decorations, docks and other shell components. Since a tree is used, a
+    group of nodes can be moved at the same time, making it possible to move a toplevel and it's decorations
+    by moving the parent node.
+
+    Changes to the scene graph are atomically applied through transactions. Transactions in this protocol
+    allow updates to parts of the scene graph to only be applied when some other condition is met. For example,
+    a change to the scene graph could be deferred until a resize has completed.
+  </description>
+
   <interface name="aerugo_wm_v1" version="1">
     <description>
       The global interface for window management in a compositor.
@@ -52,6 +70,14 @@
       <arg name="id" type="new_id" interface="aerugo_wm_toplevel_v1"/>
     </request>
 
+    <request name="get_wm_surface">
+      <description>
+        TODO
+      </description>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_surface_v1"/>
+    </request>
+
     <event name="ping">
       <description>
         The ping event asks if the wm is still alive. The serial in this event must be passed back in the "pong"
@@ -68,7 +94,8 @@
   <interface name="aerugo_wm_toplevel_v1" version="1">
     <description>
       This interface extends the ext_foreign_toplevel_handle_v1 interface, providing functionality to configure
-      the state of a toplevel.
+      the state of a toplevel. This interface also provides some additional state to describe a toplevel that
+      is useful for a WM.
     </description>
 
     <enum name="error">
@@ -82,6 +109,38 @@
 
         It is illegal to destroy the ext_foreign_toplevel_handle_v1 object the aerugo_wm_toplevel_v1 object
         was created from. Otherwise a aerugo_wm_toplevel_v1.error.defunct_object error is sent.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="aerugo_wm_surface_v1" version="1">
+    <description>
+      This interface defines a wl_surface which can be used in a scene graph by the WM.
+
+      TODO: Some more specifics
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_surface_v1 object">
+        Destroys the aerugo_wm_surface_v1 object.
+
+        TODO: Add behavior like xdg-shell where destroying the surface before the role is illegal.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="aerugo_wm_node_v1" version="1">
+    <description summary="scene graph node">
+      This interface describes a node in a scene graph.
+
+      This object is created using one of the factory requests defined in aerugo_wm_v1.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_node_v1 object">
+        Destroys the aerugo_wm_node_v1 object.
+
+        TODO: Add behavior where destroying the underlying object before the node is illegal.
       </description>
     </request>
   </interface>

@@ -7,9 +7,11 @@ use wayland_server::{
 pub mod __interfaces {
     use crate::wayland::ext::foreign_toplevel::__interfaces::*;
     use smithay::reexports::wayland_server::backend as wayland_backend;
+    use smithay::reexports::wayland_server::protocol::__interfaces::*;
     wayland_scanner::generate_interfaces!("../protocols/aerugo-wm-v1.xml");
 }
 use self::{__interfaces::*, aerugo_wm_toplevel_v1::AerugoWmToplevelV1, aerugo_wm_v1::AerugoWmV1};
+use wayland_server::protocol::*;
 
 use crate::{shell::ToplevelId, wayland::ext::foreign_toplevel::*, Aerugo};
 wayland_scanner::generate_server_code!("../protocols/aerugo-wm-v1.xml");
@@ -60,6 +62,7 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
 
                 let _wm_toplevel = init.init(id, toplevel_id);
             }
+            Request::GetWmSurface { surface: _, id: _ } => todo!(),
         }
     }
 
