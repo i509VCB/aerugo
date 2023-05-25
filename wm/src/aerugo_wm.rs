@@ -69,6 +69,15 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
             Event::RequestSetFullscreen => todo!(),
             Event::RequestUnsetFullscreen => todo!(),
             Event::ShowWindowMenu { seat: _, x: _, y: _ } => todo!(),
+            Event::SetParent { parent: _ } => todo!(),
+            Event::Move { seat: _ } => todo!(),
+            Event::Resize { seat: _ } => todo!(),
+            Event::Geometry {
+                x: _,
+                y: _,
+                width: _,
+                length: _,
+            } => todo!(),
         }
     }
 }

@@ -18,6 +18,8 @@
     Changes to the scene graph are atomically applied through transactions. Transactions in this protocol
     allow updates to parts of the scene graph to only be applied when some other condition is met. For example,
     a change to the scene graph could be deferred until a resize has completed.
+
+    TODO: Popup positioning
   </description>
 
   <interface name="aerugo_wm_v1" version="1">
@@ -183,6 +185,14 @@
       </description>
     </request>
 
+    <request name="request_close">
+      <description>
+        Notify the client that the toplevel had a request to be closed.
+
+        This request is sent immediately and is not double buffered.
+      </description>
+    </request>
+
     <event name="capabilities">
       <description>
         This event describes the capabilities of a surface.
@@ -249,11 +259,39 @@
       <arg name="y" type="int"/>
     </event>
 
-    <!-- TODO: Set parent -->
+    <event name="set_parent">
+      <description>
+        The toplevel has set a parent.
 
-    <!-- TODO: Title, App id -->
+        This is typically used by a client to indicate a toplevel should be treated like a dialog.
+      </description>
+      <arg name="parent" type="object" allow_null="true" interface="aerugo_wm_toplevel_v1"/>
+    </event>
 
-    <!-- TODO: Mirrors of move and resize -->
+    <event name="move">
+      <description>
+        The toplevel has requested an interactive move.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+    </event>
+    
+    <event name="resize">
+      <description>
+        The toplevel has requested an interactive resize.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <!-- TODO: Resize edges -->
+    </event>
+
+    <event name="geometry">
+      <description>
+        TODO
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="length" type="int"/>
+    </event>
   </interface>
 
   <interface name="aerugo_wm_surface_v1" version="1">
@@ -414,6 +452,31 @@
         The states are sent as an array of 32-bit unsigned integers in native endianness.
       </description>
       <arg name="states" type="array" summary="array of states"/>
+    </request>
+
+    <request name="size">
+      <description>
+        Suggests a new width and height for the toplevel.
+
+        If the width and height are set to 0, then the client may use any size.
+
+        The requirements for the client to conform to the size can be controlled by setting states in the
+        configure.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <request name="bounds">
+      <description>
+        Describes the suggested window geometry bounds.
+
+        This can be used to hint to a client the for a width and height that the surface will fit inside. 
+
+        If the width and height are set to 0, the bounds are unknown.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
     </request>
   </interface>
 </protocol>

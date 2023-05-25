@@ -92,6 +92,7 @@ impl Dispatch<AerugoWmToplevelV1, ToplevelId> for Aerugo {
 
         match request {
             Request::Destroy => {}
+            Request::RequestClose => todo!(),
         }
     }
 
@@ -183,6 +184,8 @@ impl Dispatch<AerugoWmConfigureV1, ()> for Aerugo {
         match request {
             Request::Destroy => todo!(),
             Request::States { states: _ } => todo!(),
+            Request::Size { width: _, height: _ } => todo!(),
+            Request::Bounds { width: _, height: _ } => todo!(),
         }
     }
 }
