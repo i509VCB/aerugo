@@ -60,7 +60,18 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
         use aerugo_wm_toplevel_v1::Event;
 
         match event {
-            Event::Capabilities { capabilities: _ } => todo!(),
+            Event::Capabilities { capabilities } => {
+                // TODO: array_chunks when stable
+                let _capabilities = capabilities
+                    .chunks_exact(4)
+                    .map(TryInto::<[u8; 4]>::try_into)
+                    .flatten()
+                    .map(u32::from_ne_bytes)
+                    .map(aerugo_wm_toplevel_v1::Capabilities::try_from)
+                    .flatten()
+                    .collect::<Vec<_>>();
+            }
+
             Event::MinSize { width: _, height: _ } => todo!(),
             Event::MaxSize { width: _, height: _ } => todo!(),
             Event::RequestSetMinimized => todo!(),

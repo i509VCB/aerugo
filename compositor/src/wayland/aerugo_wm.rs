@@ -64,7 +64,22 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
                     );
                 }
 
-                let _wm_toplevel = init.init(id, toplevel_id);
+                let wm_toplevel = init.init(id, toplevel_id);
+
+                // TODO: Query more of this info.
+                let capabilities = (vec![] as Vec<aerugo_wm_toplevel_v1::Capabilities>)
+                    .into_iter()
+                    .map(Into::<u32>::into)
+                    .map(u32::to_ne_bytes)
+                    .flatten()
+                    .collect::<Vec<_>>();
+
+                wm_toplevel.capabilities(capabilities);
+                handles.aerugo_toplevel = Some(wm_toplevel);
+                // TODO: Suggested state (such as min_size, request_fullscreen)
+
+                // Send a done event to indicate all current info has been sent.
+                handles.handle.done();
             }
             Request::GetWmSurface { surface: _, id: _ } => todo!(),
             Request::GetToplevelNode { toplevel: _, id: _ } => todo!(),
