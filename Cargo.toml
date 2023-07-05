@@ -7,7 +7,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.68"
+rust-version = "1.70"
 # license = 
 version = "0.0.1"
 authors = ["i509VCB <mail@i509.me>"]
@@ -22,7 +22,7 @@ features = [
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
-rev = "7f16dfae49241cbeb0167fd20dc2b9f8215264bb"
+rev = "cfc3545593cc627c7c8b2b2f0164a6571773f9b5"
 default-features = false
 features = [
 	"backend_egl",
@@ -49,7 +49,8 @@ version = "0.30.0"
 version = "0.30.0"
 
 [workspace.dependencies.calloop]
-version = "0.10.5"
+# TODO: Smithay upstream needs a newer calloop
+version = "0.10.6"
 features = ["executor"]
 
 [workspace.dependencies.nix]
@@ -61,7 +62,7 @@ path = "wm"
 [workspace.dependencies]
 ash = "0.37.2"
 ashpd = "0.4.0"
-bitflags = "2.0.0-rc.1"
+bitflags = "2.3.3"
 downcast-rs = "1.2.0"
 once_cell = "1.17.1"
 slotmap = "1.0.6"

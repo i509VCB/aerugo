@@ -1,6 +1,9 @@
 use std::{collections::HashMap, num::NonZeroU64, process::ExitCode};
 
-use aerugo_wm::protocol::{aerugo_wm_toplevel_v1::AerugoWmToplevelV1, aerugo_wm_v1::AerugoWmV1};
+use aerugo_wm::protocol::{
+    aerugo_wm_toplevel_v1::{self, AerugoWmToplevelV1},
+    aerugo_wm_v1::AerugoWmV1,
+};
 use foreign_toplevel::protocol::{
     ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1, ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
 };
@@ -165,6 +168,14 @@ impl Toplevel {
 struct ToplevelInfo {
     app_id: Option<String>,
     title: Option<String>,
+    capabilities: Vec<aerugo_wm_toplevel_v1::Capabilities>,
+    /// width, height
+    min_size: Option<(i32, i32)>,
+    max_size: Option<(i32, i32)>,
+    /// Id of parent.
+    parent: Option<NonZeroU64>,
+    /// x, y, width, length
+    geometry: Option<(i32, i32, i32, i32)>,
 }
 
 impl Dispatch<WlRegistry, GlobalListContents> for State {

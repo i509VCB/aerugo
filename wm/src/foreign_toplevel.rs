@@ -55,6 +55,11 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
                         current: ToplevelInfo {
                             app_id: None,
                             title: None,
+                            capabilities: Vec::new(),
+                            min_size: None,
+                            max_size: None,
+                            parent: None,
+                            geometry: None,
                         },
                         pending: None,
                         handle: toplevel,
@@ -108,8 +113,12 @@ impl Dispatch<ExtForeignToplevelHandleV1, NonZeroU64> for State {
                 toplevel.pending().app_id = Some(app_id);
             }
             Event::Identifier { identifier } => {
-                if let Err((_current, _new)) = toplevel.identifier.try_insert(identifier) {
-                    // TODO: Warn about a bad server implementation
+                if let Err((current, new)) = toplevel.identifier.try_insert(identifier) {
+                    tracing::error!(
+                        "Possible bad server implementation? handle \"{}\" had identifier changed to \"{}\"",
+                        current,
+                        new
+                    );
                 }
             }
         }

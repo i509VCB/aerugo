@@ -62,12 +62,7 @@ impl Configuration {
 
         let thread = thread::Builder::new().name("Aerugo event loop".into()).spawn(move || {
             // TODO: Proper typedef
-            let mut r#loop = EventLoop::try_new_high_precision()
-                .or_else(|err| {
-                    tracing::warn!(%err, "Failed to create high precision event loop, falling back.");
-                    EventLoop::try_new()
-                })
-                .expect("Failed to create event loop");
+            let mut r#loop = EventLoop::try_new().expect("Failed to create event loop");
 
             let signal = r#loop.get_signal();
             let (send_server, recv_server) = calloop::channel::sync_channel::<ExecutorMessage>(5);

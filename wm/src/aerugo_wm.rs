@@ -50,19 +50,21 @@ impl Dispatch<AerugoWmV1, ()> for State {
 
 impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
     fn event(
-        _state: &mut Self,
+        state: &mut Self,
         _proxy: &AerugoWmToplevelV1,
         event: aerugo_wm_toplevel_v1::Event,
-        _id: &NonZeroU64,
+        id: &NonZeroU64,
         _conn: &Connection,
         _queue: &QueueHandle<Self>,
     ) {
         use aerugo_wm_toplevel_v1::Event;
 
+        let toplevel = state.toplevels.get_mut(id).unwrap();
+
         match event {
             Event::Capabilities { capabilities } => {
                 // TODO: array_chunks when stable
-                let _capabilities = capabilities
+                let capabilities = capabilities
                     .chunks_exact(4)
                     .map(TryInto::<[u8; 4]>::try_into)
                     .flatten()
@@ -70,10 +72,31 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
                     .map(aerugo_wm_toplevel_v1::Capabilities::try_from)
                     .flatten()
                     .collect::<Vec<_>>();
+
+                toplevel.pending().capabilities = capabilities;
             }
 
-            Event::MinSize { width: _, height: _ } => todo!(),
-            Event::MaxSize { width: _, height: _ } => todo!(),
+            Event::MinSize { width, height } => {
+                // Quoting xdg-shell
+                // > a client wishing to reset the minimum size to an unspecified state can use zero for
+                // > width and height in the request
+                if width == 0 && height == 0 {
+                    toplevel.pending().min_size.take();
+                } else {
+                    toplevel.pending().min_size = Some((width, height));
+                }
+            }
+
+            Event::MaxSize { width, height } => {
+                // Quoting xdg-shell
+                // > a client wishing to reset the maximum size to an unspecified state can use zero for
+                // > width and height in the request
+                if width == 0 && height == 0 {
+                    toplevel.pending().min_size.take();
+                } else {
+                    toplevel.pending().min_size = Some((width, height));
+                }
+            }
             Event::RequestSetMinimized => todo!(),
             Event::RequestSetMaximized => todo!(),
             Event::RequestUnsetMaximized => todo!(),
@@ -83,12 +106,9 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
             Event::SetParent { parent: _ } => todo!(),
             Event::Move { seat: _ } => todo!(),
             Event::Resize { seat: _ } => todo!(),
-            Event::Geometry {
-                x: _,
-                y: _,
-                width: _,
-                length: _,
-            } => todo!(),
+            Event::Geometry { x, y, width, length } => {
+                toplevel.pending().geometry = Some((x, y, width, length));
+            }
         }
     }
 }
