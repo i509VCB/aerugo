@@ -85,6 +85,7 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
             Request::GetToplevelNode { toplevel: _, id: _ } => todo!(),
             Request::GetSurfaceNode { surface: _, id: _ } => todo!(),
             Request::CreateConfigure { id: _ } => todo!(),
+            Request::CreateTransaction { id: _ } => todo!(),
         }
     }
 

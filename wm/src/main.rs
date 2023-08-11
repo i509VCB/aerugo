@@ -16,9 +16,6 @@ use wayland_client::{
     Connection, Dispatch, Proxy,
 };
 
-mod aerugo_wm;
-mod foreign_toplevel;
-
 const FOREIGN_TOPLEVEL_LIST: u32 = 1;
 const AERUGO_WM: u32 = 1;
 

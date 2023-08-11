@@ -3,23 +3,33 @@
   <!-- TODO: Copyright -->
 
   <description>
-    The aerugo window management protocol provides a way for a special window management (WM) client to act as
-    a window manager.
+    The aerugo window management protocol provides a way for a special window management client to act as
+    a window manager (WM).
 
-    At a high level this protocol takes a list of toplevels, configures the toplevel and then describes where
-    the toplevel should be placed in a 2D coordinate space.
+    At a high level this protocol takes a list of toplevels, configures the toplevels and then describes where
+    the each toplevel should be placed in a 2D coordinate space. A configure describes what constraints the
+    future state of a toplevel should conform to.
 
     The WM starts by creating a scene graph. A scene graph declaratively describes a tree of nodes. A node in
     this context is either a toplevel or a surface created by the WM. One use case for surfaces created by the
-    WM is implementing server side decorations, docks and other shell components. Since a tree is used, a
-    group of nodes can be moved at the same time, making it possible to move a toplevel and it's decorations
-    by moving the parent node.
+    WM is implementing server side decorations, docks and other shell components. Since nodes are laid out
+    using a tree, a group of nodes can be moved at the same time by moving the parent node. This makes it
+    possible to move a toplevel and it's decorations by only moving the parent node.
 
-    Changes to the scene graph are atomically applied through transactions. Transactions in this protocol
+    Changes to the scene graph are atomically applied through transactions. A transaction in this protocol
     allow updates to parts of the scene graph to only be applied when some other condition is met. For example,
-    a change to the scene graph could be deferred until a resize has completed.
+    a change to the scene graph could be deferred until a resize has completed. A transaction can also depend
+    on some other transactions, allowing a set of updates to be scheduled.
+
+    The display server can forward client requests to the WM. For example an event on a aerugo_wm_toplevel_v1
+    type will be sent when the client wants to influence the next state like requesting fullscreen or change
+    the window geometry.
 
     TODO: Popup positioning
+
+    TODO: Layer shell positioning?
+
+    TODO: IME positioning?
   </description>
 
   <interface name="aerugo_wm_v1" version="1">
@@ -105,6 +115,13 @@
         Create a configure describing the state of a toplevel.
       </description>
       <arg name="id" type="new_id" interface="aerugo_wm_configure_v1"/>
+    </request>
+
+    <request name="create_transaction">
+      <description>
+        Create a transaction to update the scene graph.
+      </description>
+      <arg name="id" type="new_id" interface="aerugo_wm_transaction_v1"/>
     </request>
 
     <event name="ping">
@@ -478,5 +495,7 @@
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
     </request>
+
+    <!-- TODO: WM capabilities -->
   </interface>
 </protocol>

@@ -22,7 +22,7 @@ features = [
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
-rev = "cfc3545593cc627c7c8b2b2f0164a6571773f9b5"
+rev = "a4727cd5cc483821ab7b8a8aa7d17bea013d0282"
 default-features = false
 features = [
 	"backend_egl",
@@ -60,7 +60,6 @@ version = "0.26.2"
 path = "wm"
 
 [workspace.dependencies]
-ash = "0.37.2"
 ashpd = "0.4.0"
 bitflags = "2.3.3"
 downcast-rs = "1.2.0"

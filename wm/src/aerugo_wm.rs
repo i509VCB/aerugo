@@ -104,8 +104,13 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
             Event::RequestUnsetFullscreen => todo!(),
             Event::ShowWindowMenu { seat: _, x: _, y: _ } => todo!(),
             Event::SetParent { parent: _ } => todo!(),
-            Event::Move { seat: _ } => todo!(),
-            Event::Resize { seat: _ } => todo!(),
+            Event::Move { seat: _ } => {
+                // TODO: Handle move
+                tracing::warn!("Move not handled");
+            },
+            Event::Resize { seat: _ } => {
+                tracing::warn!("Resize not handled");
+            },
             Event::Geometry { x, y, width, length } => {
                 toplevel.pending().geometry = Some((x, y, width, length));
             }

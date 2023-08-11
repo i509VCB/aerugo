@@ -6,7 +6,6 @@ version = 3
 name = "aerugo-comp"
 version = "0.1.0"
 dependencies = [
- "ash",
  "bitflags 2.3.3",
  "calloop",
  "clap",
@@ -28,6 +27,7 @@ dependencies = [
  "once_cell",
  "tracing",
  "tracing-subscriber",
+ "wayland-backend",
  "wayland-client",
  "wayland-scanner",
 ]
@@ -880,7 +880,7 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/Smithay/smithay?rev=cfc3545593cc627c7c8b2b2f0164a6571773f9b5#cfc3545593cc627c7c8b2b2f0164a6571773f9b5"
+source = "git+https://github.com/Smithay/smithay?rev=a4727cd5cc483821ab7b8a8aa7d17bea013d0282#a4727cd5cc483821ab7b8a8aa7d17bea013d0282"
 dependencies = [
  "appendlist",
  "ash",

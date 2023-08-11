@@ -74,6 +74,7 @@ pub enum Renderer {
     /// Use the OpenGL ES renderer.
     #[clap(alias("egl"))]
     #[clap(alias("gl"))]
+    #[clap(alias("gles"))]
     Gles,
     // #[clap(alias("vk"))]
     // Vulkan, // TODO
