@@ -22,6 +22,7 @@ mod configure;
 mod error;
 mod event;
 mod id;
+mod node;
 mod transaction;
 mod wm;
 
@@ -29,6 +30,7 @@ pub use configure::*;
 pub use error::*;
 pub use event::*;
 pub use transaction::*;
+use wayland_client::protocol::wl_surface::WlSurface;
 
 /// A handle to the window management capabilities of the display server.
 pub struct Wm(wm::Inner);
@@ -38,16 +40,78 @@ impl Wm {
     pub fn new() -> Result<Self, Setup> {
         wm::Inner::new().map(Wm)
     }
+
+    pub fn get_status(&self, _transaction: TransactionId) -> Status {
+        todo!()
+    }
+
+    // TODO: Creating transactions
+
+    // TODO: Cancelling transactions
+
+    // TODO: Polling related stuff
 }
 
-/// An id used to identify a toplevel.
+/// Id used to identify a toplevel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ToplevelId(id::Toplevel);
 
-/// An id used to identify some submitted transaction.
+/// Id used to identify some submitted transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransactionId(id::Transaction);
 
-/// A scene graph node.
+/// Status of a transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Node(id::Node);
+pub enum Status {
+    Pending,
+
+    Finished,
+
+    Cancelled,
+}
+
+/// Marker trait used to parameterize the type of a node in functions.
+pub trait Node: private::NodePrivate + Sized {}
+
+/// A node backed by a surface.
+///
+/// This type of node allows the wm client to place it's own surfaces in the scene graph.
+#[derive(Debug)]
+pub struct SurfaceNode(node::Surface);
+impl Node for SurfaceNode {}
+
+impl SurfaceNode {
+    pub fn surface(&self) -> &WlSurface {
+        &self.0.wl_surface
+    }
+}
+
+// TODO: Implement HasWindowHandle for SurfaceNode?
+
+/// A node backed by a toplevel.
+///
+/// This effectively allows a toplevel to be placed in the scene graph with modifiers.
+pub struct ToplevelNode(node::Toplevel);
+impl Node for ToplevelNode {}
+
+impl ToplevelNode {
+    pub fn toplevel(&self) -> ToplevelId {
+        self.0.toplevel
+    }
+
+    /// Return the identifier of the underlying toplevel handle.
+    pub fn identifier(&self) -> &str {
+        todo!()
+    }
+}
+
+mod private {
+    use std::num::NonZeroU32;
+
+    /// Crate private implementation details for node implementations.
+    pub trait NodePrivate: Sized {
+        fn generation(&self) -> NonZeroU32;
+
+        // TODO: Anything generic over parameters should be delegated to here
+    }
+}

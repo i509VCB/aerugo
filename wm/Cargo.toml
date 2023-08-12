@@ -10,3 +10,4 @@ tracing-subscriber = { workspace = true }
 wayland-client = { workspace = true }
 wayland-backend = { workspace = true }
 wayland-scanner = { workspace = true }
+static_assertions = { workspace = true }
