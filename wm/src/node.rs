@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use wayland_client::protocol::wl_surface::WlSurface;
 
-use crate::{private, SurfaceNode, ToplevelId, ToplevelNode, Wm};
+use crate::{private, SurfaceNode, ToplevelId, ToplevelNode};
 
 #[derive(Debug)]
 pub struct Surface {

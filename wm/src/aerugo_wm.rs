@@ -1,8 +1,10 @@
-use std::num::NonZeroU64;
-
+use euclid::{Point2D, Rect, Size2D};
 use wayland_client::{Connection, Dispatch, QueueHandle};
 
-use crate::State;
+use crate::{
+    id,
+    wm::{self, Inner, ToplevelUpdate},
+};
 
 use self::protocol::{
     aerugo_wm_node_v1::{self, AerugoWmNodeV1},
@@ -28,7 +30,7 @@ pub mod protocol {
     wayland_scanner::generate_client_code!("../protocols/aerugo-wm-v1.xml");
 }
 
-impl Dispatch<AerugoWmV1, ()> for State {
+impl Dispatch<AerugoWmV1, ()> for wm::Inner {
     fn event(
         _state: &mut Self,
         wm: &AerugoWmV1,
@@ -48,54 +50,54 @@ impl Dispatch<AerugoWmV1, ()> for State {
     }
 }
 
-impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
+impl Dispatch<AerugoWmToplevelV1, id::Toplevel> for Inner {
     fn event(
         state: &mut Self,
         _proxy: &AerugoWmToplevelV1,
         event: aerugo_wm_toplevel_v1::Event,
-        id: &NonZeroU64,
+        id: &id::Toplevel,
         _conn: &Connection,
         _queue: &QueueHandle<Self>,
     ) {
         use aerugo_wm_toplevel_v1::Event;
 
-        let toplevel = state.toplevels.get_mut(id).unwrap();
+        let id = *id;
 
         match event {
-            Event::Capabilities { capabilities } => {
-                // TODO: array_chunks when stable
-                let capabilities = capabilities
-                    .chunks_exact(4)
-                    .map(TryInto::<[u8; 4]>::try_into)
-                    .flatten()
-                    .map(u32::from_ne_bytes)
-                    .map(aerugo_wm_toplevel_v1::Capabilities::try_from)
-                    .flatten()
-                    .collect::<Vec<_>>();
+            Event::Capabilities { capabilities: _ } => {
+                // // TODO: array_chunks when stable
+                // let capabilities = capabilities
+                //     .chunks_exact(4)
+                //     .map(TryInto::<[u8; 4]>::try_into)
+                //     .flatten()
+                //     .map(u32::from_ne_bytes)
+                //     .map(aerugo_wm_toplevel_v1::Capabilities::try_from)
+                //     .flatten()
+                //     .collect::<Vec<_>>();
 
-                toplevel.pending().capabilities = capabilities;
+                // toplevel.pending().capabilities = capabilities;
             }
 
-            Event::MinSize { width, height } => {
-                // Quoting xdg-shell
-                // > a client wishing to reset the minimum size to an unspecified state can use zero for
-                // > width and height in the request
-                if width == 0 && height == 0 {
-                    toplevel.pending().min_size.take();
-                } else {
-                    toplevel.pending().min_size = Some((width, height));
-                }
+            Event::MinSize { width: _, height: _ } => {
+                // // Quoting xdg-shell
+                // // > a client wishing to reset the minimum size to an unspecified state can use zero for
+                // // > width and height in the request
+                // if width == 0 && height == 0 {
+                //     toplevel.pending().min_size.take();
+                // } else {
+                //     toplevel.pending().min_size = Some((width, height));
+                // }
             }
 
-            Event::MaxSize { width, height } => {
-                // Quoting xdg-shell
-                // > a client wishing to reset the maximum size to an unspecified state can use zero for
-                // > width and height in the request
-                if width == 0 && height == 0 {
-                    toplevel.pending().min_size.take();
-                } else {
-                    toplevel.pending().min_size = Some((width, height));
-                }
+            Event::MaxSize { width: _, height: _ } => {
+                // // Quoting xdg-shell
+                // // > a client wishing to reset the maximum size to an unspecified state can use zero for
+                // // > width and height in the request
+                // if width == 0 && height == 0 {
+                //     toplevel.pending().min_size.take();
+                // } else {
+                //     toplevel.pending().min_size = Some((width, height));
+                // }
             }
             Event::RequestSetMinimized => todo!(),
             Event::RequestSetMaximized => todo!(),
@@ -107,19 +109,22 @@ impl Dispatch<AerugoWmToplevelV1, NonZeroU64> for State {
             Event::Move { seat: _ } => {
                 // TODO: Handle move
                 tracing::warn!("Move not handled");
-            },
+            }
             Event::Resize { seat: _ } => {
                 tracing::warn!("Resize not handled");
-            },
+            }
             Event::Geometry { x, y, width, length } => {
-                toplevel.pending().geometry = Some((x, y, width, length));
+                state.update_toplevel(
+                    id,
+                    ToplevelUpdate::Geometry(Rect::new(Point2D::new(x, y), Size2D::new(width, length))),
+                );
             }
         }
     }
 }
 
 // TODO: User data for surface?
-impl Dispatch<AerugoWmSurfaceV1, ()> for State {
+impl Dispatch<AerugoWmSurfaceV1, ()> for Inner {
     fn event(
         _state: &mut Self,
         _proxy: &AerugoWmSurfaceV1,
@@ -133,7 +138,7 @@ impl Dispatch<AerugoWmSurfaceV1, ()> for State {
 }
 
 // TODO: User data for node?
-impl Dispatch<AerugoWmNodeV1, ()> for State {
+impl Dispatch<AerugoWmNodeV1, ()> for Inner {
     fn event(
         _state: &mut Self,
         _proxy: &AerugoWmNodeV1,
@@ -147,7 +152,7 @@ impl Dispatch<AerugoWmNodeV1, ()> for State {
 }
 
 // TODO: User data for transaction?
-impl Dispatch<AerugoWmTransactionV1, ()> for State {
+impl Dispatch<AerugoWmTransactionV1, ()> for Inner {
     fn event(
         _state: &mut Self,
         _proxy: &AerugoWmTransactionV1,

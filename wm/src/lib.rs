@@ -18,31 +18,73 @@
 //!
 //! [wayland-client]: https://crates.io/crates/wayland-client
 
+mod aerugo_wm;
 mod configure;
 mod error;
 mod event;
+mod foreign_toplevel;
 mod id;
 mod node;
 mod transaction;
 mod wm;
 
+use std::io;
+
 pub use configure::*;
 pub use error::*;
 pub use event::*;
 pub use transaction::*;
-use wayland_client::protocol::wl_surface::WlSurface;
+
+pub use euclid;
+
+use wayland_client::{protocol::wl_surface::WlSurface, Connection, EventQueue};
+
+pub struct AlreadyDestroyed;
 
 /// A handle to the window management capabilities of the display server.
-pub struct Wm(wm::Inner);
+pub struct Wm {
+    inner: wm::Inner,
+    queue: EventQueue<wm::Inner>,
+}
 
 impl Wm {
     // TODO: Connection/Backend?
-    pub fn new() -> Result<Self, Setup> {
-        wm::Inner::new().map(Wm)
+    pub fn new(conn: &Connection) -> Result<Self, Setup> {
+        let (inner, queue) = wm::Inner::new(conn)?;
+        Ok(Self { inner, queue })
+    }
+
+    pub fn blocking_dispatch(&mut self) -> io::Result<()> {
+        self.queue
+            .blocking_dispatch(&mut self.inner)
+            .map_err(wm::map_dispatch)?;
+        Ok(())
+    }
+
+    /// Read an event from the wm.
+    ///
+    /// Returns [`None`] if there are no more pending messages.
+    pub fn read_event(&mut self) -> Option<Event> {
+        self.inner.pop_event()
     }
 
     pub fn get_status(&self, _transaction: TransactionId) -> Status {
         todo!()
+    }
+
+    /// Return the identifier of the underlying foreign toplevel handle.
+    ///
+    /// This can be used to correlate a toplevel instance from this [`Wm`] elsewhere.
+    pub fn get_toplevel_identifier(&self, _toplevel: ToplevelId) -> Option<&str> {
+        todo!()
+    }
+
+    /// Release the toplevel's resources.
+    ///
+    /// Calling this function will result in the toplevel being unmapped and forgotten by the [`Wm`] instance.
+    /// If this is not called as a result of a [`ToplevelEvent::Closed`] event, will not reappear.
+    pub fn release_toplevel(&mut self, toplevel: ToplevelId) -> Result<(), AlreadyDestroyed> {
+        self.inner.release_toplevel(toplevel.0)
     }
 
     // TODO: Creating transactions
@@ -52,11 +94,11 @@ impl Wm {
     // TODO: Polling related stuff
 }
 
-/// Id used to identify a toplevel.
+/// id used to identify a toplevel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ToplevelId(id::Toplevel);
 
-/// Id used to identify some submitted transaction.
+/// id used to identify some submitted transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransactionId(id::Transaction);
 
@@ -97,11 +139,6 @@ impl Node for ToplevelNode {}
 impl ToplevelNode {
     pub fn toplevel(&self) -> ToplevelId {
         self.0.toplevel
-    }
-
-    /// Return the identifier of the underlying toplevel handle.
-    pub fn identifier(&self) -> &str {
-        todo!()
     }
 }
 

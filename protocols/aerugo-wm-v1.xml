@@ -142,6 +142,8 @@
       This interface extends the ext_foreign_toplevel_handle_v1 interface, providing functionality to configure
       the state of a toplevel. This interface also provides some additional state to describe a toplevel that
       is useful for a WM.
+
+      A toplevel's last state may be displayed in a scene graph even if closed.
     </description>
 
     <enum name="error">
@@ -497,5 +499,7 @@
     </request>
 
     <!-- TODO: WM capabilities -->
+
+    <!-- TODO: Decorations -->
   </interface>
 </protocol>
