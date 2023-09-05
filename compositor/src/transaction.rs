@@ -164,21 +164,31 @@ impl DependencyTracker {
     pub fn finish(&mut self, id: Id) {
         if !self.nodes.contains_key(id) {
             return;
-        };
+        }
 
         // Use a stack to iterate without recursion.
         let mut stack = vec![id];
 
-        // TODO: Remove this node from the dependencies of the dependents.
         while !stack.is_empty() {
-            for dependent in mem::take(&mut stack) {
-                let node = self.nodes.get_mut(dependent).unwrap();
+            for id in mem::take(&mut stack) {
+                let node = self.nodes.get_mut(id).unwrap();
 
-                if !node.dependents.is_empty() {
-                    stack.extend(node.dependents.iter());
+                // Remove the dependency from each dependent
+                let dependents = node.dependents.clone();
+
+                for dependent in dependents {
+                    let node = self.nodes.get_mut(dependent).unwrap();
+                    node.dependencies.retain(|&dependency| dependency != id);
+
+                    // Queue the dependent if all dependencies have been fulfilled.
+                    if node.dependencies.is_empty() {
+                        stack.push(dependent);
+                    }
                 }
 
-                // TODO: Figure this out
+                let node = self.nodes.get_mut(id).unwrap();
+                node.status = Status::Finished;
+                self.finished.push(id);
             }
         }
     }
@@ -348,7 +358,6 @@ mod tests {
         assert_eq!(finished.len(), 1);
     }
 
-    // TODO: Fix a not being marked as Finished
     /// ```text
     /// B -> A
     /// ```
@@ -367,5 +376,177 @@ mod tests {
         let finished = tracker.drain_finished();
         assert!(finished.contains(&a));
         assert!(finished.contains(&b));
+    }
+
+    /// ```text
+    ///     /--> A
+    /// C --
+    ///     \--> B
+    /// ```
+    #[test]
+    fn finish_branch() {
+        let mut tracker = DependencyTracker::new();
+        let a = tracker.create_id();
+        let b = tracker.create_id();
+        let c = tracker.create_id();
+        assert!(tracker.add_dependency(a, c).is_ok());
+        assert!(tracker.add_dependency(b, c).is_ok());
+
+        tracker.finish(c);
+        assert_eq!(tracker.get_status(a), Some(Status::Finished));
+        assert_eq!(tracker.get_status(b), Some(Status::Finished));
+        assert_eq!(tracker.get_status(c), Some(Status::Finished));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&a));
+        assert!(finished.contains(&b));
+        assert!(finished.contains(&c));
+    }
+
+    /// ```text
+    /// B -\
+    ///     -> A
+    /// C -/
+    /// ```
+    #[test]
+    fn finish_merge() {
+        let mut tracker = DependencyTracker::new();
+        let a = tracker.create_id();
+        let b = tracker.create_id();
+        let c = tracker.create_id();
+        assert!(tracker.add_dependency(a, b).is_ok());
+        assert!(tracker.add_dependency(a, c).is_ok());
+
+        // B finished, C and A should still be queued.
+        tracker.finish(b);
+        assert_eq!(tracker.get_status(b), Some(Status::Finished));
+
+        assert_eq!(tracker.get_status(c), Some(Status::Queued));
+        assert_eq!(tracker.get_status(a), Some(Status::Queued));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&b));
+        assert!(!finished.contains(&a));
+        assert!(!finished.contains(&c));
+        assert_eq!(finished.len(), 1);
+
+        // C finished, so A must also finish
+        tracker.finish(c);
+        assert_eq!(tracker.get_status(c), Some(Status::Finished));
+        assert_eq!(tracker.get_status(a), Some(Status::Finished));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&a));
+        assert!(finished.contains(&c));
+        assert!(!finished.contains(&b));
+        assert_eq!(finished.len(), 2);
+    }
+
+    /// ```text
+    /// D -> B -\
+    ///          -> A
+    /// C ------/
+    /// ```
+    #[test]
+    fn finish_merge_chain() {
+        let mut tracker = DependencyTracker::new();
+        let a = tracker.create_id();
+        let b = tracker.create_id();
+        let c = tracker.create_id();
+        let d = tracker.create_id();
+        assert!(tracker.add_dependency(a, b).is_ok());
+        assert!(tracker.add_dependency(b, d).is_ok());
+        assert!(tracker.add_dependency(a, c).is_ok());
+
+        // D finished, B should be finished A and C should still be queued.
+        tracker.finish(d);
+        assert_eq!(tracker.get_status(d), Some(Status::Finished));
+        assert_eq!(tracker.get_status(b), Some(Status::Finished));
+
+        assert_eq!(tracker.get_status(a), Some(Status::Queued));
+        assert_eq!(tracker.get_status(c), Some(Status::Queued));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&b));
+        assert!(finished.contains(&d));
+        assert!(!finished.contains(&a));
+        assert!(!finished.contains(&c));
+        assert_eq!(finished.len(), 2);
+
+        // B finished, C and A should still be queued.
+        tracker.finish(b);
+        assert_eq!(tracker.get_status(b), Some(Status::Finished));
+
+        assert_eq!(tracker.get_status(c), Some(Status::Queued));
+        assert_eq!(tracker.get_status(a), Some(Status::Queued));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&b));
+        assert!(!finished.contains(&a));
+        assert!(!finished.contains(&c));
+        assert_eq!(finished.len(), 1);
+
+        // C finished, so A must also finish
+        tracker.finish(c);
+        assert_eq!(tracker.get_status(c), Some(Status::Finished));
+        assert_eq!(tracker.get_status(a), Some(Status::Finished));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&a));
+        assert!(finished.contains(&c));
+        assert!(!finished.contains(&b));
+        assert_eq!(finished.len(), 2);
+    }
+
+    /// ```text
+    /// D -\      /-> A
+    ///     -> C -
+    /// E -/      \-> B
+    /// ```
+    #[test]
+    fn finish_merge_branch() {
+        let mut tracker = DependencyTracker::new();
+        let a = tracker.create_id();
+        let b = tracker.create_id();
+        let c = tracker.create_id();
+        let d = tracker.create_id();
+        let e = tracker.create_id();
+
+        assert!(tracker.add_dependency(c, d).is_ok());
+        assert!(tracker.add_dependency(c, e).is_ok());
+        assert!(tracker.add_dependency(a, c).is_ok());
+        assert!(tracker.add_dependency(b, c).is_ok());
+
+        // D finished, everything else should be queued.
+        tracker.finish(d);
+        assert_eq!(tracker.get_status(d), Some(Status::Finished));
+
+        assert_eq!(tracker.get_status(a), Some(Status::Queued));
+        assert_eq!(tracker.get_status(b), Some(Status::Queued));
+        assert_eq!(tracker.get_status(c), Some(Status::Queued));
+        assert_eq!(tracker.get_status(e), Some(Status::Queued));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&d));
+        assert!(!finished.contains(&a));
+        assert!(!finished.contains(&b));
+        assert!(!finished.contains(&c));
+        assert!(!finished.contains(&e));
+        assert_eq!(finished.len(), 1);
+
+        // E finished, everything should finish
+        tracker.finish(e);
+        assert_eq!(tracker.get_status(a), Some(Status::Finished));
+        assert_eq!(tracker.get_status(b), Some(Status::Finished));
+        assert_eq!(tracker.get_status(c), Some(Status::Finished));
+        assert_eq!(tracker.get_status(e), Some(Status::Finished));
+
+        let finished = tracker.drain_finished();
+        assert!(!finished.contains(&d));
+        assert!(finished.contains(&a));
+        assert!(finished.contains(&b));
+        assert!(finished.contains(&c));
+        assert!(finished.contains(&e));
+        assert_eq!(finished.len(), 4);
     }
 }

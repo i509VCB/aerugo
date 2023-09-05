@@ -23,6 +23,7 @@ planned to be implemented:
 | Viewporter              | ❌                 | Planned | <!-- wp -->
 | DRM lease               | ❌                 | Planned |
 | Linux Dmabuf            | 4                 |         |
+| Input method            | ❌                 | Planned |
 | Single Pixel Buffer     | ❌                 | Planned |
 | Content type hint       | ❌                 | Planned |
 | Tearing control         | ❌                 | Planned |
