@@ -8,6 +8,7 @@ use std::{
 };
 
 use euclid::{Rect, UnknownUnit};
+use rustix::io::Errno;
 use wayland_backend::{client::WaylandError, protocol::ProtocolError};
 use wayland_client::{
     globals::{BindError, GlobalList, GlobalListContents},
@@ -158,7 +159,7 @@ impl Inner {
     pub fn update_toplevel(&mut self, id: id::Toplevel, update: ToplevelUpdate) {
         let Some(toplevel) = self.toplevels.get_mut(&id.id) else {
             // TODO: Warn
-            return
+            return;
         };
 
         dbg!(&update);
@@ -245,7 +246,7 @@ pub fn map_dispatch(err: DispatchError) -> io::Error {
         } => {
             let protocol_id = sender_id.protocol_id();
             let message = format!("bad message from {interface}@{protocol_id} with opcode {opcode}");
-            io::Error::new(io::ErrorKind::Other, message)
+            io::Error::new(io::ErrorKind::InvalidData, message)
         }
         wayland_client::DispatchError::Backend(WaylandError::Io(io)) => io,
         wayland_client::DispatchError::Backend(WaylandError::Protocol(ProtocolError {
@@ -262,7 +263,7 @@ pub fn map_dispatch(err: DispatchError) -> io::Error {
                 let _ = write!(message, ": {error_message}");
             }
 
-            io::Error::new(io::ErrorKind::Other, message)
+            io::Error::from_raw_os_error(Errno::PROTO.raw_os_error())
         }
     }
 }

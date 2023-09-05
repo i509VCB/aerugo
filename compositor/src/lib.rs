@@ -20,6 +20,7 @@ pub mod forest;
 mod scene;
 mod shell;
 mod state;
+mod transaction;
 mod wayland;
 
 pub use state::Aerugo;

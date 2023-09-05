@@ -56,6 +56,9 @@ features = ["executor"]
 [workspace.dependencies.nix]
 version = "0.26.2"
 
+[workspace.dependencies.rustix]
+version = "0.38.11"
+
 [workspace.dependencies.aerugo-wm]
 path = "wm"
 

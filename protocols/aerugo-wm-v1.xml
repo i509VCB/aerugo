@@ -7,8 +7,8 @@
     a window manager (WM).
 
     At a high level this protocol takes a list of toplevels, configures the toplevels and then describes where
-    the each toplevel should be placed in a 2D coordinate space. A configure describes what constraints the
-    future state of a toplevel should conform to.
+    the each toplevel should be placed in a 2D coordinate space. The root of the 2D coordinate space is then
+    mapped to an output. A configure describes what constraints the future state of a toplevel should conform to.
 
     The WM starts by creating a scene graph. A scene graph declaratively describes a tree of nodes. A node in
     this context is either a toplevel or a surface created by the WM. One use case for surfaces created by the
@@ -24,6 +24,12 @@
     The display server can forward client requests to the WM. For example an event on a aerugo_wm_toplevel_v1
     type will be sent when the client wants to influence the next state like requesting fullscreen or change
     the window geometry.
+
+    A scene graph is then displayed by presenting it to an output. A WM can learn about the output coordinate
+    space through a protocol such as xdg-output. If a WM wishes to control where each output is mapped in the
+    global coordinate space, using wlr-output-management-unstable-v1 is one approach to do that. Note that an
+    output will clip any content that leaves the bounds of the output. If you want to have a toplevel appear
+    between two outputs then you will need a node per output.
 
     TODO: Popup positioning
 
