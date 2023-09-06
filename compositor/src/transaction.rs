@@ -184,11 +184,8 @@ impl DependencyTracker {
                 for dependent in dependents {
                     let node = self.nodes.get_mut(dependent).unwrap();
                     node.dependencies.retain(|&dependency| dependency != id);
-
-                    // Queue the dependent if all dependencies have been fulfilled.
-                    if node.dependencies.is_empty() {
-                        stack.push(dependent);
-                    }
+                    // queue the dependent for processing
+                    stack.push(dependent);
                 }
 
                 let node = self.nodes.get_mut(id).unwrap();
