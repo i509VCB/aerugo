@@ -173,6 +173,11 @@ impl DependencyTracker {
             for id in mem::take(&mut stack) {
                 let node = self.nodes.get_mut(id).unwrap();
 
+                // If the node has unfinished dependencies, skip it.
+                if !node.dependencies.is_empty() {
+                    continue;
+                }
+
                 // Remove the dependency from each dependent
                 let dependents = node.dependents.clone();
 
@@ -548,5 +553,40 @@ mod tests {
         assert!(finished.contains(&c));
         assert!(finished.contains(&e));
         assert_eq!(finished.len(), 4);
+    }
+
+    /// ```text
+    /// C -> B -> A
+    /// ```
+    #[test]
+    fn finish_middle() {
+        let mut tracker = DependencyTracker::new();
+        let a = tracker.create_id();
+        let b = tracker.create_id();
+        let c = tracker.create_id();
+
+        assert!(tracker.add_dependency(a, b).is_ok());
+        assert!(tracker.add_dependency(b, c).is_ok());
+
+        // Middle node was finished, so nothing is finished
+        tracker.finish(b);
+        assert_eq!(tracker.get_status(a), Some(Status::Queued));
+        assert_eq!(tracker.get_status(b), Some(Status::Queued));
+        assert_eq!(tracker.get_status(c), Some(Status::Queued));
+
+        let finished = dbg!(tracker.drain_finished());
+        assert!(finished.is_empty());
+
+        // C finished, so all should finish
+        tracker.finish(c);
+        assert_eq!(tracker.get_status(a), Some(Status::Finished));
+        assert_eq!(tracker.get_status(b), Some(Status::Finished));
+        assert_eq!(tracker.get_status(c), Some(Status::Finished));
+
+        let finished = tracker.drain_finished();
+        assert!(finished.contains(&a));
+        assert!(finished.contains(&b));
+        assert!(finished.contains(&c));
+        assert_eq!(finished.len(), 3);
     }
 }
