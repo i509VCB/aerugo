@@ -571,7 +571,7 @@ mod tests {
         assert_eq!(tracker.get_status(b), Some(Status::Queued));
         assert_eq!(tracker.get_status(c), Some(Status::Queued));
 
-        let finished = dbg!(tracker.drain_finished());
+        let finished = tracker.drain_finished();
         assert!(finished.is_empty());
 
         // C finished, so all should finish
