@@ -66,7 +66,7 @@ If the clients fail to commit the previous transaction states, should the WM's n
 client state, and cancel the previous transaction?
 */
 
-use std::{collections::hash_map::Entry, num::NonZeroU64};
+use std::{collections::hash_map::Entry, fmt, hash::Hash, num::NonZeroU64, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use smithay::{
@@ -75,14 +75,16 @@ use smithay::{
     utils::{Logical, Serial, Size},
     wayland::{
         compositor::{self, SurfaceAttributes, TraversalAction},
-        shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData},
+        shell::{
+            wlr_layer,
+            xdg::{ToplevelSurface, XdgToplevelSurfaceData},
+        },
     },
     xwayland::X11Surface,
 };
 use wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Client, DisplayHandle, Resource};
 
 use crate::{
-    scene::NodeIndex,
     wayland::{
         aerugo_wm::aerugo_wm_toplevel_v1::AerugoWmToplevelV1,
         ext::foreign_toplevel::{
@@ -92,6 +94,40 @@ use crate::{
     },
     Aerugo,
 };
+
+/// A surface with some assigned role.
+#[derive(Clone)]
+pub struct AerugoSurface(Arc<SurfaceInner>);
+
+impl AerugoSurface {}
+
+impl fmt::Debug for AerugoSurface {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AerugoSurface").finish()
+    }
+}
+
+impl fmt::Display for AerugoSurface {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+impl PartialEq for AerugoSurface {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+struct SurfaceInner {
+    kind: SurfaceKind,
+}
+
+enum SurfaceKind {
+    Toplevel(ToplevelSurface),
+    XWayland(X11Surface),
+    WlrLayer(wlr_layer::LayerSurface),
+}
 
 #[derive(Debug)]
 pub struct Shell {
@@ -121,6 +157,16 @@ pub struct ForeignToplevelInstance {
 pub enum Surface {
     Toplevel(ToplevelSurface),
     XWayland(X11Surface),
+}
+
+impl Surface {
+    pub fn ensure_configured(&self) -> bool {
+        match self {
+            Surface::Toplevel(toplevel) => toplevel.ensure_configured(),
+            // TODO: Xwayland?
+            Surface::XWayland(_) => false,
+        }
+    }
 }
 
 /// A toplevel surface.
@@ -270,7 +316,17 @@ struct Mapped {
     serial: Serial,
 }
 
+struct AerugoToplevelData {
+    toplevel_id: ToplevelId,
+}
+
 impl Shell {
+    pub fn get_toplevel_id(surface: &WlSurface) -> Option<ToplevelId> {
+        compositor::with_states(surface, |data| {
+            data.data_map.get::<AerugoToplevelData>().map(|data| data.toplevel_id)
+        })
+    }
+
     pub fn new() -> Self {
         Shell {
             pending_toplevels: Vec::new(),
@@ -281,185 +337,244 @@ impl Shell {
     }
 
     pub fn commit(comp: &mut Aerugo, surface: &WlSurface) {
-        let has_buffer = with_renderer_surface_state(surface, |state| state.buffer().is_some());
+        // Handle commit for each type of role.
+        Shell::toplevel_commit(comp, surface);
+    }
 
-        // If the surface is pending, tell the WM about the new window.
-        if let Some(toplevel_index) = comp
-            .shell
-            .pending_toplevels
-            .iter()
-            .position(|toplevel| toplevel.wl_surface() == surface)
-        {
-            let toplevel = comp.shell.pending_toplevels.remove(toplevel_index);
-
-            // Query some info about the toplevel for logging.
-            let app_id = compositor::with_states(toplevel.wl_surface(), |states| {
-                states
-                    .data_map
-                    .get::<XdgToplevelSurfaceData>()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .app_id
-                    .clone()
-            })
-            .unwrap_or_default();
-
-            // Ensure the toplevel has no attached buffer during initial commit
-            if has_buffer {
-                tracing::warn!(%app_id, "Killing client: attached buffer during initial commit");
-                todo!("Either add XdgSurface to ToplevelSurface or search")
-                // TODO: Send UnconfiguredBuffer
-            }
-
-            // TODO: Remove this temporary configure and make the WM send the configure.
-            toplevel.with_pending_state(|state| {
-                // Set some size to make smithay and send a configure.
-                //
-                // FIXME: This seems broken as extension protocols have no way to force a configure to be sent.
-                state.size = Some((0, 0).into());
-            });
-            toplevel.send_configure();
-
-            let id = comp.shell.next_toplevel_id;
-
-            tracing::debug!(%id, %app_id, "Initial commit of toplevel");
-
-            comp.shell.next_toplevel_id = comp
+    pub fn toplevel_commit(comp: &mut Aerugo, surface: &WlSurface) {
+        let Some(id) = Shell::get_toplevel_id(surface) else {
+            // If the surface is pending, then an initial commit has happened.
+            if let Some(toplevel_index) = comp
                 .shell
-                .next_toplevel_id
-                .checked_add(1)
-                .expect("u64 overflow (unlikely)");
-
-            let toplevel = comp.shell.toplevels.entry(id).or_insert(Toplevel {
-                id,
-                surface: Surface::Toplevel(toplevel),
-                current: State::default(),
-                pending: None,
-                handles: FxHashMap::default(),
-            });
-
-            let mut new_instances = Vec::with_capacity(comp.shell.foreign_toplevel_instances.len());
-
-            // Create the foreign toplevel handles
-            for instance in comp.shell.foreign_toplevel_instances.values() {
-                // Create all toplevel handle instances to ensure that extension protocols do not refer to handles
-                // that were not yet created.
-                if let Some(client) = instance.instance.client() {
-                    new_instances.push(toplevel.create_handle(
-                        comp.generation,
-                        &instance.instance,
-                        &comp.display,
-                        &client,
-                    ));
-                }
-            }
-
-            // Describe the toplevel.
-            for new in new_instances {
-                toplevel.initialize_handle(&new);
+                .pending_toplevels
+                .iter()
+                .position(|toplevel| toplevel.wl_surface() == surface)
+            {
+                let toplevel = comp.shell.pending_toplevels.remove(toplevel_index);
             }
 
             return;
-        }
+        };
 
-        // If the surface is mapped (which it will be if it is not pending) and a buffer is no longer attached
-        // then unmap the surface and return it to pending.
-        if !has_buffer {
-            if let Some(key) = comp
-                .shell
-                .toplevels
-                .iter()
-                .find_map(|(key, toplevel)| (toplevel.wl_surface().as_ref() == Some(surface)).then_some(*key))
-            {
-                match comp.shell.toplevels.entry(key) {
-                    Entry::Occupied(entry) => {
-                        // If the surface was never mapped assume a second initial commit was sent and apply
-                        // the state.
-                        let toplevel = entry.get();
-
-                        if !matches!(toplevel.current, State::NotYetMapped) {
-                            // TODO: Include app_id, remove toplevel debug impl
-                            tracing::debug!(?toplevel, "Unmap toplevel");
-                            let toplevel = entry.remove();
-
-                            // Notify clients the toplevel is being unmapped.
-                            for handle in toplevel.handles.values() {
-                                handle.handle.closed();
-                            }
-
-                            match toplevel.surface {
-                                Surface::Toplevel(surface) => comp.shell.pending_toplevels.push(surface),
-                                Surface::XWayland(_) => todo!("How to handle xwayland?"),
-                            }
-
-                            return;
-                        }
-                    }
-
-                    Entry::Vacant(_) => unreachable!("initial commit must have occurred"),
-                }
-            }
-        }
-
-        if let Some(toplevel) = comp
+        let toplevel = comp
             .shell
             .toplevels
-            .values_mut()
-            .find(|toplevel| toplevel.wl_surface().as_ref() == Some(surface))
-        {
-            match &toplevel.surface {
-                Surface::Toplevel(surface) => {
-                    // Ensure the configure was acked before applying state.
-                    if !surface.ensure_configured() {
-                        let id = toplevel.id;
-                        let app_id = toplevel.app_id().unwrap_or_default();
-                        tracing::warn!(%id, %app_id, "Killing client: toplevel not configured");
-                    }
+            .get_mut(&id)
+            .expect("invalid state: toplevel was unmapped before initial commit");
 
-                    // Verify the toplevel's state is correct if some states were configured.
-                    let current = surface.current_state();
-                    let states = &current.states;
-                    let _size = current.size;
+        let has_buffer = with_renderer_surface_state(surface, |state| state.buffer().is_some());
 
-                    if states.contains(xdg_toplevel::State::Maximized) {
-                        // From xdg-shell:
-                        // > The window geometry specified in the configure event must be obeyed by the client
-                        //
-                        // TODO: Check window geometry and compare to the committed size.
-                    }
+        // Toplevel was unmapped.
+        if !has_buffer {
+            // If the surface was never mapped do not unmap the toplevel since the client may have needed a
+            // second commit to communicate all state.
+            if !matches!(toplevel.current, State::NotYetMapped) {
+                // TODO: Include app_id, remove toplevel debug impl
+                tracing::debug!(?toplevel, "Unmap toplevel");
+                let toplevel = comp.shell.toplevels.remove(&id).unwrap();
 
-                    if states.contains(xdg_toplevel::State::Fullscreen) {
-                        // From xdg-shell:
-                        // > The window geometry specified in the configure event is a maximum; the client
-                        // > cannot resize beyond it.
-                        //
-                        // This means the compositor can insert letterboxes if needed.
-                        //
-                        // TODO: Check that window geometry does not exceed the configured size.
-                    }
-
-                    if states.contains(xdg_toplevel::State::Resizing) {
-                        // From xdg-shell:
-                        // > The window geometry specified in the configure event is a maximum; the client
-                        // > cannot resize beyond it. Clients that have aspect ratio or cell sizing configuration
-                        // > can use a smaller size, however.
-                        //
-                        // TODO: Check that window geometry does not exceed the configured size.
-                    }
-
-                    // Activated and Tiled do not need to be checked here.
-
-                    // TODO: Transaction setup
-                    // FIXME: This is horrible.
-                    let tree = comp.scene.create_surface_tree(surface.wl_surface().clone());
-                    comp.scene.set_output_node(&comp.output, NodeIndex::SurfaceTree(tree));
-                    send_frames_surface_tree(surface.wl_surface(), 0);
+                // Notify clients the toplevel is being unmapped.
+                for handle in toplevel.handles.values() {
+                    handle.handle.closed();
                 }
-                Surface::XWayland(_) => todo!("how to handle xwayland"),
+
+                match toplevel.surface {
+                    Surface::Toplevel(surface) => comp.shell.pending_toplevels.push(surface),
+                    Surface::XWayland(_) => todo!("How to handle xwayland?"),
+                }
+
+                return;
             }
         }
+
+        // Make sure initial configure was acked.
+        if has_buffer && !toplevel.surface.ensure_configured() {
+            let id = toplevel.id;
+            let app_id = toplevel.app_id().unwrap_or_default();
+            tracing::warn!(%id, %app_id, "Killing client: toplevel not configured");
+        }
     }
+
+    // pub fn commit(comp: &mut Aerugo, surface: &WlSurface) {
+    //     let has_buffer = with_renderer_surface_state(surface, |state| state.buffer().is_some());
+
+    //     // If the surface is pending, tell the WM about the new window.
+    //     if let Some(toplevel_index) = comp
+    //         .shell
+    //         .pending_toplevels
+    //         .iter()
+    //         .position(|toplevel| toplevel.wl_surface() == surface)
+    //     {
+    //         let toplevel = comp.shell.pending_toplevels.remove(toplevel_index);
+
+    //         // Query some info about the toplevel for logging.
+    //         let app_id = compositor::with_states(toplevel.wl_surface(), |states| {
+    //             states
+    //                 .data_map
+    //                 .get::<XdgToplevelSurfaceData>()
+    //                 .unwrap()
+    //                 .lock()
+    //                 .unwrap()
+    //                 .app_id
+    //                 .clone()
+    //         })
+    //         .unwrap_or_default();
+
+    //         // Ensure the toplevel has no attached buffer during initial commit
+    //         if has_buffer {
+    //             tracing::warn!(%app_id, "Killing client: attached buffer during initial commit");
+    //             todo!("Either add XdgSurface to ToplevelSurface or search")
+    //             // TODO: Send UnconfiguredBuffer
+    //         }
+
+    //         // TODO: Remove this temporary configure and make the WM send the configure.
+    //         toplevel.with_pending_state(|state| {
+    //             // Set some size to make smithay and send a configure.
+    //             //
+    //             // FIXME: This seems broken as extension protocols have no way to force a configure to be sent.
+    //             state.size = Some((0, 0).into());
+    //         });
+    //         toplevel.send_configure();
+
+    //         let id = comp.shell.next_toplevel_id;
+
+    //         tracing::debug!(%id, %app_id, "Initial commit of toplevel");
+
+    //         comp.shell.next_toplevel_id = comp
+    //             .shell
+    //             .next_toplevel_id
+    //             .checked_add(1)
+    //             .expect("u64 overflow (unlikely)");
+
+    //         let toplevel = comp.shell.toplevels.entry(id).or_insert(Toplevel {
+    //             id,
+    //             surface: Surface::Toplevel(toplevel),
+    //             current: State::default(),
+    //             pending: None,
+    //             handles: FxHashMap::default(),
+    //         });
+
+    //         let mut new_instances = Vec::with_capacity(comp.shell.foreign_toplevel_instances.len());
+
+    //         // Create the foreign toplevel handles
+    //         for instance in comp.shell.foreign_toplevel_instances.values() {
+    //             // Create all toplevel handle instances to ensure that extension protocols do not refer to handles
+    //             // that were not yet created.
+    //             if let Some(client) = instance.instance.client() {
+    //                 new_instances.push(toplevel.create_handle(
+    //                     comp.generation,
+    //                     &instance.instance,
+    //                     &comp.display,
+    //                     &client,
+    //                 ));
+    //             }
+    //         }
+
+    //         // Describe the toplevel.
+    //         for new in new_instances {
+    //             toplevel.initialize_handle(&new);
+    //         }
+
+    //         return;
+    //     }
+
+    //     // If the surface is mapped (which it will be if it is not pending) and a buffer is no longer attached
+    //     // then unmap the surface and return it to pending.
+    //     if !has_buffer {
+    //         if let Some(key) = comp
+    //             .shell
+    //             .toplevels
+    //             .iter()
+    //             .find_map(|(key, toplevel)| (toplevel.wl_surface().as_ref() == Some(surface)).then_some(*key))
+    //         {
+    //             match comp.shell.toplevels.entry(key) {
+    //                 Entry::Occupied(entry) => {
+    //                     // If the surface was never mapped assume a second initial commit was sent and apply
+    //                     // the state.
+    //                     let toplevel = entry.get();
+
+    //                     if !matches!(toplevel.current, State::NotYetMapped) {
+    //                         // TODO: Include app_id, remove toplevel debug impl
+    //                         tracing::debug!(?toplevel, "Unmap toplevel");
+    //                         let toplevel = entry.remove();
+
+    //                         // Notify clients the toplevel is being unmapped.
+    //                         for handle in toplevel.handles.values() {
+    //                             handle.handle.closed();
+    //                         }
+
+    //                         match toplevel.surface {
+    //                             Surface::Toplevel(surface) => comp.shell.pending_toplevels.push(surface),
+    //                             Surface::XWayland(_) => todo!("How to handle xwayland?"),
+    //                         }
+
+    //                         return;
+    //                     }
+    //                 }
+
+    //                 Entry::Vacant(_) => unreachable!("initial commit must have occurred"),
+    //             }
+    //         }
+    //     }
+
+    //     if let Some(toplevel) = comp
+    //         .shell
+    //         .toplevels
+    //         .values_mut()
+    //         .find(|toplevel| toplevel.wl_surface().as_ref() == Some(surface))
+    //     {
+    //         match &toplevel.surface {
+    //             Surface::Toplevel(surface) => {
+    //                 // Ensure the configure was acked before applying state.
+    //                 if has_buffer && !surface.ensure_configured()  {
+    //                     let id = toplevel.id;
+    //                     let app_id = toplevel.app_id().unwrap_or_default();
+    //                     tracing::warn!(%id, %app_id, "Killing client: toplevel not configured");
+    //                 }
+
+    //                 // Verify the toplevel's state is correct if some states were configured.
+    //                 let current = surface.current_state();
+    //                 let states = &current.states;
+    //                 let _size = current.size;
+
+    //                 if states.contains(xdg_toplevel::State::Maximized) {
+    //                     // From xdg-shell:
+    //                     // > The window geometry specified in the configure event must be obeyed by the client
+    //                     //
+    //                     // TODO: Check window geometry and compare to the committed size.
+    //                 }
+
+    //                 if states.contains(xdg_toplevel::State::Fullscreen) {
+    //                     // From xdg-shell:
+    //                     // > The window geometry specified in the configure event is a maximum; the client
+    //                     // > cannot resize beyond it.
+    //                     //
+    //                     // This means the compositor can insert letterboxes if needed.
+    //                     //
+    //                     // TODO: Check that window geometry does not exceed the configured size.
+    //                 }
+
+    //                 if states.contains(xdg_toplevel::State::Resizing) {
+    //                     // From xdg-shell:
+    //                     // > The window geometry specified in the configure event is a maximum; the client
+    //                     // > cannot resize beyond it. Clients that have aspect ratio or cell sizing configuration
+    //                     // > can use a smaller size, however.
+    //                     //
+    //                     // TODO: Check that window geometry does not exceed the configured size.
+    //                 }
+
+    //                 // Activated and Tiled do not need to be checked here.
+
+    //                 // TODO: Transaction setup
+    //                 // FIXME: This is horrible.
+    //                 let tree = comp.scene.create_surface_tree(surface.wl_surface().clone());
+    //                 comp.scene.set_output_node(&comp.output, NodeIndex::SurfaceTree(tree));
+    //                 send_frames_surface_tree(surface.wl_surface(), 0);
+    //             }
+    //             Surface::XWayland(_) => todo!("how to handle xwayland"),
+    //         }
+    //     }
+    // }
 
     pub fn remove_toplevel(comp: &mut Aerugo, surface: &WlSurface) {
         // Remove toplevels that are pending

@@ -81,10 +81,18 @@ impl Wm {
 
     /// Release the toplevel's resources.
     ///
-    /// Calling this function will result in the toplevel being unmapped and forgotten by the [`Wm`] instance.
-    /// If this is not called as a result of a [`ToplevelEvent::Closed`] event, will not reappear.
+    /// Calling this function will result in the toplevel being unmapped and forgotten by the [`Wm`] instance
+    /// if this is not called as a result of a [`ToplevelEvent::Closed`] event.
     pub fn release_toplevel(&mut self, toplevel: ToplevelId) -> Result<(), AlreadyDestroyed> {
         self.inner.release_toplevel(toplevel.0)
+    }
+
+    pub fn create_toplevel_node(&mut self, toplevel: ToplevelId) -> ToplevelNode {
+        todo!()
+    }
+
+    pub fn create_transaction(&self) -> Transaction<'_> {
+        todo!()
     }
 
     // TODO: Creating transactions

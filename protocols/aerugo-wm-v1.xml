@@ -31,11 +31,16 @@
     output will clip any content that leaves the bounds of the output. If you want to have a toplevel appear
     between two outputs then you will need a node per output.
 
-    TODO: Popup positioning
+    TODO: Popup positioning? (If needed)
 
     TODO: Layer shell positioning?
 
-    TODO: IME positioning?
+    TODO: IME positioning? (if needed)
+
+    The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL
+    NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and
+    "OPTIONAL" in this document are to be interpreted as described in
+    RFC 2119.
   </description>
 
   <interface name="aerugo_wm_v1" version="1">
@@ -70,7 +75,7 @@
 
     <request name="pong">
       <description>
-        The WM must respond to a ping event with a pong request or the WM may be deemed unresponsive.
+        The WM MUST respond to a ping event with a pong request or the WM may be deemed unresponsive.
 
         See aerugo_wm_v1.ping and aerugo_wm_v1.error.unresponsive for more information.
       </description>
@@ -81,7 +86,7 @@
       <description>
         Creates the aerugo_wm_toplevel_v1 object for the ext_foreign_toplevel_handle_v1 instance.
 
-        It is illegal to create more than one aerugo_wm_toplevel_v1 per ext_foreign_toplevel_handle_v1 object.
+        More than one aerugo_wm_toplevel_v1 per ext_foreign_toplevel_handle_v1 object MUST NOT be created.
         Otherwise a aerugo_wm_v1.error.already_extended error is sent.
       </description>
       <arg name="handle" type="object" interface="ext_foreign_toplevel_handle_v1"/>
@@ -116,11 +121,11 @@
       <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
     </request>
 
-    <request name="create_configure">
+    <request name="create_toplevel_configure">
       <description>
         Create a configure describing the state of a toplevel.
       </description>
-      <arg name="id" type="new_id" interface="aerugo_wm_configure_v1"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_toplevel_configure_v1"/>
     </request>
 
     <request name="create_transaction">
@@ -132,7 +137,7 @@
 
     <event name="ping">
       <description>
-        The ping event asks if the wm is still alive. The serial in this event must be passed back in the "pong"
+        The ping event asks if the wm is still alive. The serial in this event MUST be passed back in the "pong"
         event in some amount of time to be kept alive.
 
         If the wm is unresponsive, the server may decide when the wm is considered dead and disconnected.
@@ -371,20 +376,20 @@
 
         This allows a set of atomic operations to depend on each other.
 
-        A WM must not cause dependency cycles or cause a transaction to depend on itself. (TODO: protocol
+        A WM MUST NOT cause dependency cycles or cause a transaction to depend on itself. (TODO: protocol
         error for this).
       </description>
       <arg name="dependency" type="object" interface="aerugo_wm_transaction_v1"/>
     </request>
 
-    <request name="configure">
+    <request name="toplevel_configure">
       <description>
         Add a dependency on a configure being applied. This can be used to ensure the state of a toplevel is
         updated before applying a graph update.
       </description>
       <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1"
            summary="the toplevel to configure"/>
-      <arg name="configure" type="object" interface="aerugo_wm_configure_v1"
+      <arg name="configure" type="object" interface="aerugo_wm_toplevel_configure_v1"
            summary="the configure to apply to the toplevel"/>
     </request>
 
@@ -435,7 +440,7 @@
         When a transaction is cancelled, the transaction will be sent a aerugo_wm_transaction_v1.failed event
         and any other transactions depending on that transaction.
 
-        A client must only cancel a transaction after it was submitted. Otherwise a protocol error occurs
+        A client MUST NOT cancel a transaction before it was submitted. Otherwise a protocol error occurs
         (TODO: what error)
       </description>
     </request>
@@ -455,7 +460,7 @@
     </event>
   </interface>
 
-  <interface name="aerugo_wm_configure_v1" version="1">
+  <interface name="aerugo_wm_toplevel_configure_v1" version="1">
     <description>
       This interface describes a configure for a aerugo_wm_toplevel_v1.
 
@@ -465,8 +470,8 @@
     </description>
 
     <request name="destroy" type="destructor">
-      <description summary="destroy the aerugo_wm_configure_v1 object">
-        Destroys the aerugo_wm_configure_v1 object.
+      <description summary="destroy the aerugo_wm_toplevel_configure_v1 object">
+        Destroys the aerugo_wm_toplevel_configure_v1 object.
       </description>
     </request>
 

@@ -11,8 +11,8 @@ pub mod __interfaces {
     wayland_scanner::generate_interfaces!("../protocols/aerugo-wm-v1.xml");
 }
 use self::{
-    __interfaces::*, aerugo_wm_configure_v1::AerugoWmConfigureV1, aerugo_wm_node_v1::AerugoWmNodeV1,
-    aerugo_wm_surface_v1::AerugoWmSurfaceV1, aerugo_wm_toplevel_v1::AerugoWmToplevelV1,
+    __interfaces::*, aerugo_wm_node_v1::AerugoWmNodeV1, aerugo_wm_surface_v1::AerugoWmSurfaceV1,
+    aerugo_wm_toplevel_configure_v1::AerugoWmToplevelConfigureV1, aerugo_wm_toplevel_v1::AerugoWmToplevelV1,
     aerugo_wm_transaction_v1::AerugoWmTransactionV1, aerugo_wm_v1::AerugoWmV1,
 };
 use wayland_server::protocol::*;
@@ -84,7 +84,7 @@ impl Dispatch<AerugoWmV1, ()> for Aerugo {
             Request::GetWmSurface { surface: _, id: _ } => todo!(),
             Request::GetToplevelNode { toplevel: _, id: _ } => todo!(),
             Request::GetSurfaceNode { surface: _, id: _ } => todo!(),
-            Request::CreateConfigure { id: _ } => todo!(),
+            Request::CreateToplevelConfigure { id: _ } => todo!(),
             Request::CreateTransaction { id: _ } => todo!(),
         }
     }
@@ -168,7 +168,7 @@ impl Dispatch<AerugoWmTransactionV1, ()> for Aerugo {
         match request {
             Request::Destroy => todo!(),
             Request::Dependency { dependency: _ } => todo!(),
-            Request::Configure {
+            Request::ToplevelConfigure {
                 toplevel: _,
                 configure: _,
             } => todo!(),
@@ -185,17 +185,17 @@ impl Dispatch<AerugoWmTransactionV1, ()> for Aerugo {
 }
 
 // TODO: User data for configure?
-impl Dispatch<AerugoWmConfigureV1, ()> for Aerugo {
+impl Dispatch<AerugoWmToplevelConfigureV1, ()> for Aerugo {
     fn request(
         _state: &mut Self,
         _client: &Client,
-        _resource: &AerugoWmConfigureV1,
-        request: aerugo_wm_configure_v1::Request,
+        _resource: &AerugoWmToplevelConfigureV1,
+        request: aerugo_wm_toplevel_configure_v1::Request,
         _data: &(),
         _display: &DisplayHandle,
         _data_init: &mut DataInit<'_, Self>,
     ) {
-        use aerugo_wm_configure_v1::Request;
+        use aerugo_wm_toplevel_configure_v1::Request;
 
         match request {
             Request::Destroy => todo!(),
