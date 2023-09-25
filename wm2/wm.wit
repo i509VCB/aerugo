@@ -1,0 +1,13 @@
+package aerugo:wm@0.0.1
+
+world aerugo-wm {
+    export wm
+}
+
+interface wm {
+    resource wm-res {
+        name: func() -> string
+    }
+
+    create-wm: func() -> result<wm-res, string>
+}

@@ -1,13 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-	"compositor",
-	"wm",
+	#"compositor",
+	#"wm",
+	"wm2"
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.71"
 # license = 
 version = "0.0.1"
 authors = ["i509VCB <mail@i509.me>"]

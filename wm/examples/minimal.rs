@@ -66,8 +66,8 @@ fn main() {
         };
 
         // Configure the current surface.
-        let configure = Configure::default()
-            .states(
+        let mut configure = Configure::default();
+        configure.states(
                 States::MAXIMIZED
                     | States::FULLSCREEN
                     | States::TILED_BOTTOM
