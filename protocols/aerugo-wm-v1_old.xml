@@ -75,7 +75,7 @@
 
     <request name="pong">
       <description>
-        The WM must respond to a ping event with a pong request or the WM may be deemed unresponsive.
+        The WM MUST respond to a ping event with a pong request or the WM may be deemed unresponsive.
 
         See aerugo_wm_v1.ping and aerugo_wm_v1.error.unresponsive for more information.
       </description>
@@ -93,19 +93,46 @@
       <arg name="id" type="new_id" interface="aerugo_wm_toplevel_v1"/>
     </request>
 
-    <request name="create_node_params" summary="Create a temporary object for node parameters">
+    <request name="get_wm_surface">
       <description>
-        This temporary object is used to collect properties used to create a aerugo_wm_node_v1 object.
+        TODO
       </description>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_surface_v1"/>
+    </request>
 
-      <arg name="id" type="new_id" interface="aerugo_wm_node_params_v1"/>
+    <request name="get_toplevel_node">
+      <description>
+        Create a node referencing the toplevel.
+
+        Multiple nodes can exist that reference the same toplevel.
+      </description>
+      <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
+    </request>
+
+    <request name="get_surface_node">
+      <description>
+        Create a node referencing a surface.
+
+        Multiple nodes can exist that reference the same surface.
+      </description>
+      <arg name="surface" type="object" interface="aerugo_wm_surface_v1"/>
+      <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
     </request>
 
     <request name="create_toplevel_configure">
       <description>
-        Create a configure describing a state to apply to a toplevel.
+        Create a configure describing the state of a toplevel.
       </description>
       <arg name="id" type="new_id" interface="aerugo_wm_toplevel_configure_v1"/>
+    </request>
+
+    <request name="create_transaction">
+      <description>
+        Create a transaction to update the scene graph.
+      </description>
+      <arg name="id" type="new_id" interface="aerugo_wm_transaction_v1"/>
     </request>
 
     <event name="ping">
@@ -113,7 +140,7 @@
         The ping event asks if the wm is still alive. The serial in this event MUST be passed back in the "pong"
         event in some amount of time to be kept alive.
 
-        If the wm is unresponsive, the server may decide when the wm is considered dead and disconnect it.
+        If the wm is unresponsive, the server may decide when the wm is considered dead and disconnected.
 
         See aerugo_wm_v1.ping and aerugo_wm_v1.error.unresponsive for more information.
       </description>
@@ -147,9 +174,6 @@
 
       <entry name="tiled_states" value="1"
              summary="whether the tiled states are supported"/>
-
-      <entry name="wm_capabilities" value="2"
-             summary="whether the toplevel knows of wm capabilities"/>
     </enum>
 
     <enum name="wm_capabilities">
@@ -300,68 +324,27 @@
     </event>
   </interface>
 
-  <interface name="aerugo_wm_node_params_v1" version="1">
-    <description summary="Parameters for creating a aerugo_wm_node_v1">
-      This interface describes a parameters used to create a aerugo_wm_node_v1 object.
+  <interface name="aerugo_wm_surface_v1" version="1">
+    <description>
+      This interface defines a wl_surface which can be used in a scene graph by the WM.
 
-      This object is created using one of the factory requests defined in aerugo_wm_v1.
+      TODO: Some more specifics
     </description>
 
-    <enum name="error">
-      <entry name="type_already_set" value="0"
-             summary="the type of this node has already been set"/>
-
-      <entry name="role" value="1"
-             summary="the surface already has a role object"/>        
-    </error>
-
     <request name="destroy" type="destructor">
-      <description summary="destroy the aerugo_wm_node_params_v1 object">
-        Destroys the aerugo_wm_node_params_v1 object.
+      <description summary="destroy the aerugo_wm_surface_v1 object">
+        Destroys the aerugo_wm_surface_v1 object.
+
+        TODO: Add behavior like xdg-shell where destroying the surface before the role is illegal.
       </description>
-    </request>
-
-    <request name="toplevel" summary="create a toplevel node">
-      <description summary="Parameters for creating a aerugo_wm_node_v1">
-        This request indicates the node's content is backed by a toplevel's contents.
-
-        If this request is issued, it is illegal to issue the aerugo_wm_node_params_v1.surface request and this
-        will result in a aerugo_wm_node_params_v1.error.type_already_set
-      </description>
-
-      <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1"/>
-    </request>
-
-    <request name="surface" summary="create a surface node">
-      <description summary="Parameters for creating a aerugo_wm_node_v1">
-        This request indicates the node's content is backed by a wm client provided wl_surface.
-
-        This request assigns a role to the surface. It is illegal to create an aerugo_wm_node_params_v1 for a
-        wl_surface which already has an assigned role and this will result in a aerugo_wm_node_params_v1.error.role
-        error.
-
-        If this request is issued, it is illegal to issue the aerugo_wm_node_params_v1.toplevel request and this
-        will result in a aerugo_wm_node_params_v1.error.type_already_set
-      </description>
-
-      <arg name="surface" type="object" interface="wl_surface"/>
-    </request>
-
-    <request name="create">
-      <description>
-        It is not mandatory to issue 'create'. If a client wants to cancel the creation of a node, it can just
-        destroy this object.
-
-        The client should destroy the aerugo_wm_node_params_v1 object after this.
-      </description>
-
-      <arg name="id" type="new_id" interface="aerugo_wm_node_v1"/>
     </request>
   </interface>
 
   <interface name="aerugo_wm_node_v1" version="1">
     <description summary="scene graph node">
       This interface describes a node in a scene graph.
+
+      This object is created using one of the factory requests defined in aerugo_wm_v1.
     </description>
 
     <request name="destroy" type="destructor">
@@ -373,8 +356,112 @@
     </request>
   </interface>
 
+  <interface name="aerugo_wm_transaction_v1" version="1">
+    <description>
+      A transaction describes a set of toplevel state and graph updates that are atomically applied.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the aerugo_wm_transaction_v1 object">
+        Destroys the aerugo_wm_transaction_v1 object.
+
+        TODO: What semantics should this have?
+      </description>
+    </request>
+
+    <request name="dependency">
+      <description>
+        Adds a dependency on another transaction. The dependency must complete before this transaction is
+        completed.
+
+        This allows a set of atomic operations to depend on each other.
+
+        A WM MUST NOT cause dependency cycles or cause a transaction to depend on itself. (TODO: protocol
+        error for this).
+      </description>
+      <arg name="dependency" type="object" interface="aerugo_wm_transaction_v1"/>
+    </request>
+
+    <request name="toplevel_configure">
+      <description>
+        Add a dependency on a configure being applied. This can be used to ensure the state of a toplevel is
+        updated before applying a graph update.
+      </description>
+      <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1"
+           summary="the toplevel to configure"/>
+      <arg name="configure" type="object" interface="aerugo_wm_toplevel_configure_v1"
+           summary="the configure to apply to the toplevel"/>
+    </request>
+
+    <request name="move">
+      <description>
+        Move a node relative to the parent when a transaction has completed.
+
+        If no offset is specified, the node is assumed to have an offset of 0 px in the x and y position.
+
+        The move will not be applied until the transaction is completed.
+      </description>
+      <arg name="node" type="object" interface="aerugo_wm_node_v1" summary="the node to move relative to the parent"/>
+      <arg name="offset_x" type="int" summary="x offset from the parent in pixels"/>
+      <arg name="offset_y" type="int" summary="y offset from the parent in pixels"/>
+    </request>
+
+    <request name="set_output_node">
+      <description>
+        Set the node that should be presented to an output.
+
+        The offset of the node is relative to the origin of the output. A NULL node can be set not present a
+        node to the output.
+
+        This will not be applied until the transaction is completed.
+      </description>
+      <arg name="output" type="object" interface="wl_output" summary="the output to present to"/>
+      <arg name="node" type="object" allow_null="true" interface="aerugo_wm_node_v1"
+           summary="the node to present to an output"/>
+    </request>
+
+    <!-- TODO: Node relations -->
+  
+    <request name="submit">
+      <description>
+        Queue the transaction to be applied.
+
+        The dependency transactions must be submitted before this transaction.
+
+        At some time in the future either a aerugo_wm_transaction_v1.applied or aerugo_wm_transaction_v1.failed
+        event will be handled by the client to indicate when the transaction has been applied or failed to apply.
+      </description>
+    </request>
+
+    <request name="cancel">
+      <description>
+        Cancel an active transaction.
+
+        When a transaction is cancelled, the transaction will be sent a aerugo_wm_transaction_v1.failed event
+        and any other transactions depending on that transaction.
+
+        A client MUST NOT cancel a transaction before it was submitted. Otherwise a protocol error occurs
+        (TODO: what error)
+      </description>
+    </request>
+
+    <event name="applied">
+      <description>
+        The transaction has completed and all updates to the state have been applied.
+
+        The client can destroy the aerugo_wm_transaction_v1 object.
+      </description>
+    </event>
+
+    <event name="failed">
+      <description>
+        The transaction failed. (TODO: Describe why could a transaction fail?)
+      </description>
+    </event>
+  </interface>
+
   <interface name="aerugo_wm_toplevel_configure_v1" version="1">
-    <description summary="toplevel configure">
+    <description>
       This interface describes a configure for a aerugo_wm_toplevel_v1.
 
       A configure describes the state a window must conform to. This interface heavily mirrors the configure
@@ -382,96 +469,17 @@
       xdg-decoration.
     </description>
 
-    <enum name="error">
-      <entry name="already_used" value="0"
-             summary="the configure object has already been used"/>
-
-      <entry name="no_toplevel" value="1"
-             summary="the configure object did not specify what toplevel to configure"/>
-
-      <entry name="invalid_size" value="2"
-             summary="the size to configure is invalid"/>
-
-      <entry name="toplevel_already_set" value="3"
-             summary="the toplevel to configure has already been set"/>
-
-      <entry name="states_already_set" value="4"
-             summary="the states to configure has already been set"/>
-
-      <entry name="size_already_set" value="5"
-             summary="the size to configure has already been set"/>
-
-      <entry name="bounds_already_set" value="6"
-             summary="the bounds to configure has already been set"/>
-
-      <entry name="wm_capabilities_already_set" value="7"
-             summary="the wm capabilities to configure has already been set"/>
-
-      <entry name="decorations_already_set" value="8"
-             summary="the decoration mode to configure has already been set"/>
-
-      <entry name="unsupported_states" value="9"
-             summary="the toplevel does not support all the set states"/>
-
-      <entry name="unsupported_wm_capabilities" value="10"
-             summary="the toplevel does not wm capabilities"/>
-
-      <entry name="unsupported_decorations" value="11"
-             summary="the toplevel does not support server side decorations"/>
-    </enum>
-
-    <enum name="decoration_mode">
-      <entry name="client_side" value="0"
-             summary="the client should decorate the toplevel"/>
-
-      <entry name="server_side" value="1"
-             summary="the server should decorate the toplevel"/>
-    </enum>
-
     <request name="destroy" type="destructor">
       <description summary="destroy the aerugo_wm_toplevel_configure_v1 object">
         Destroys the aerugo_wm_toplevel_configure_v1 object.
       </description>
     </request>
 
-    <request name="configure" summary="configure the toplevel">
-      <description>
-        Send this configure to the toplevel.
-
-        When the configure is acked by the toplevel, a aerugo_wm_toplevel_configure_v1.acked event will be
-        sent.
-
-        This request can be sent only once in the object's lifetime, after which the only legal request is
-        aerugo_wm_toplevel_configure_v1.destroy. A aerugo_wm_toplevel_configure_v1.error.already_used error
-        MUST be sent if any other request is sent.
-
-        It is not mandatory to issue 'configure'. If a client wants to cancel the configure, it can just
-        destroy this object.
-      </description>
-    </request>
-
-    <request name="toplevel" summary="toplevel to configure">
-      <description>
-        Specify the toplevel to configure.
-
-        This request MUST be sent only once in the object's lifetime. A aerugo_wm_toplevel_configure_v1.error.toplevel_already_set
-        MUST be sent if this request is issued more than once.
-      </description>
-      <arg name="toplevel" type="object" interface="aerugo_wm_toplevel_v1" summary="toplevel to configure"/>
-    </request>
-
     <request name="states">
       <description>
         Describes the states to configure for the toplevel.
 
-        The states are sent as an array of 32-bit unsigned integers values of aerugo_wm_toplevel_v1.states
-        in native endianness.
-
-        If any of the tiled states are set and the toplevel does not indicate support for the states, a aerugo_wm_toplevel_configure_v1.error.unsupported_states
-        error MUST be sent.
-
-        This request MUST be sent only once in the object's lifetime. A aerugo_wm_toplevel_configure_v1.error.states_already_set
-        MUST be sent if this request is issued more than once.
+        The states are sent as an array of 32-bit unsigned integers in native endianness.
       </description>
       <arg name="states" type="array" summary="array of states"/>
     </request>
@@ -480,14 +488,10 @@
       <description>
         Suggests a new width and height for the toplevel.
 
-        If the width and height are set to 0, then the client may use any size. The width and height MUST NOT
-        be negative. Otherwise a aerugo_wm_toplevel_configure_v1.error.invalid_size error MUST be sent.
+        If the width and height are set to 0, then the client may use any size.
 
         The requirements for the client to conform to the size can be controlled by setting states in the
         configure.
-
-        This request MUST be sent only once in the object's lifetime. A aerugo_wm_toplevel_configure_v1.error.size_already_set
-        MUST be sent if this request is issued more than once.
       </description>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
@@ -499,54 +503,14 @@
 
         This can be used to hint to a client the for a width and height that the surface will fit inside. 
 
-        If the width and height are set to 0, the bounds are unknown. The width and height MUST NOT be negative.
-        Otherwise a aerugo_wm_toplevel_configure_v1.error.invalid_size error MUST be sent.
-
-        If the toplevel does not support bounds, the toplevel will behave as if the bounds are unknown.
-
-        This request MUST be sent only once in the object's lifetime. A aerugo_wm_toplevel_configure_v1.error.bounds_already_set
-        MUST be sent if this request is issued more than once.
+        If the width and height are set to 0, the bounds are unknown.
       </description>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
     </request>
 
-    <request name="wm_capabilities">
-      <description>
-        Describe the capabilities of the window manager.
+    <!-- TODO: WM capabilities -->
 
-        The states are sent as an array of 32-bit unsigned integers values of aerugo_wm_toplevel_v1.wm_capabilities
-        in native endianness.
-
-        If the toplevel does not indicate support for the wm capabilities and this request is issued, a
-        aerugo_wm_toplevel_configure_v1.error.unsupported_wm_capabilities error MUST be sent.
-
-        This request MUST be sent only once in the object's lifetime. A aerugo_wm_toplevel_configure_v1.error.wm_capabilities_already_set
-        MUST be sent if this request is issued more than once.
-      </description>
-      <arg name="states" type="array" summary="array of wm_capabilities"/>
-    </request>
-
-    <request name="decorations">
-      <description>
-        Describe the decoration mode of the toplevel.
-
-        If the decoration mode is decoration_mode.server_side and the toplevel does not indicate support for
-        server side decorations then a aerugo_wm_toplevel_configure_v1.error.unsupported_decorations error
-        MUST be sent.
-
-        This request MUST be sent only once in the object's lifetime. A aerugo_wm_toplevel_configure_v1.error.decorations_already_set
-        MUST be sent if this request is issued more than once.
-      </description>
-      <arg name="states" type="uint" enum="decoration_mode" summary="array of wm_capabilities"/>
-    </request>
-
-    <event name="acked">
-      <description>
-        The configure was acked. This means the state in this configure has been applied to the toplevel.
-
-        The client should destroy the aerugo_wm_toplevel_configure_v1 object.
-      </description>
-    </event>
+    <!-- TODO: Decorations -->
   </interface>
 </protocol>
