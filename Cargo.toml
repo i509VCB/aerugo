@@ -2,8 +2,7 @@
 resolver = "2"
 members = [
 	#"compositor",
-	#"wm",
-	"wm2"
+	"examples/*"
 ]
 
 [workspace.package]
@@ -62,6 +61,9 @@ version = "0.38.11"
 
 [workspace.dependencies.aerugo-wm]
 path = "wm"
+
+[workspace.dependencies.wit-bindgen]
+git = "https://github.com/bytecodealliance/wit-bindgen"
 
 [workspace.dependencies]
 ashpd = "0.4.0"

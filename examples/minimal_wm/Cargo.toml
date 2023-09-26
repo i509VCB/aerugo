@@ -1,0 +1,15 @@
+[package]
+name = "minimal_wm"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+xkeysym = "0.2.0"

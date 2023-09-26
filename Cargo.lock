@@ -111,6 +111,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
+name = "minimal_wm"
+version = "0.0.1"
+dependencies = [
+ "wit-bindgen",
+ "xkeysym",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -325,7 +333,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen"
 version = "0.12.0"
-source = "git+https://github.com/bytecodealliance/wit-bindgen/#637389a0409e83597807b71bade607c383ad0cf8"
+source = "git+https://github.com/bytecodealliance/wit-bindgen#637389a0409e83597807b71bade607c383ad0cf8"
 dependencies = [
  "bitflags 2.4.0",
  "wit-bindgen-rust-macro",
@@ -334,7 +342,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-core"
 version = "0.12.0"
-source = "git+https://github.com/bytecodealliance/wit-bindgen/#637389a0409e83597807b71bade607c383ad0cf8"
+source = "git+https://github.com/bytecodealliance/wit-bindgen#637389a0409e83597807b71bade607c383ad0cf8"
 dependencies = [
  "anyhow",
  "wit-component",
@@ -344,7 +352,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-rust"
 version = "0.12.0"
-source = "git+https://github.com/bytecodealliance/wit-bindgen/#637389a0409e83597807b71bade607c383ad0cf8"
+source = "git+https://github.com/bytecodealliance/wit-bindgen#637389a0409e83597807b71bade607c383ad0cf8"
 dependencies = [
  "anyhow",
  "heck",
@@ -357,7 +365,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-rust-lib"
 version = "0.12.0"
-source = "git+https://github.com/bytecodealliance/wit-bindgen/#637389a0409e83597807b71bade607c383ad0cf8"
+source = "git+https://github.com/bytecodealliance/wit-bindgen#637389a0409e83597807b71bade607c383ad0cf8"
 dependencies = [
  "heck",
  "wit-bindgen-core",
@@ -366,7 +374,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-rust-macro"
 version = "0.12.0"
-source = "git+https://github.com/bytecodealliance/wit-bindgen/#637389a0409e83597807b71bade607c383ad0cf8"
+source = "git+https://github.com/bytecodealliance/wit-bindgen#637389a0409e83597807b71bade607c383ad0cf8"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -414,8 +422,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "wm2"
-version = "0.0.1"
-dependencies = [
- "wit-bindgen",
-]
+name = "xkeysym"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "054a8e68b76250b253f671d1268cb7f1ae089ec35e195b2efb2a4e9a836d0621"
