@@ -1,5 +1,8 @@
 //! Implementation for the `ext-foreign-toplevel` family of protocols.
 
+// TODO: Move this out of here
+#![allow(non_upper_case_globals, non_camel_case_types)]
+
 // ext-foreign-toplevel-list-v1 is not yet part of wayland-protocols so we need to generate it
 
 // Re-export only the actual code, and then only use this re-export
@@ -7,14 +10,10 @@
 // and avoid exposing internal details.
 //
 // You can use all the types from my_protocol as if they went from `wayland_client::protocol`.
-use wayland_server::{
-    backend::{ClientId, ObjectId},
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
-};
+use wayland_server::{backend::ClientId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource};
 
 use crate::{
     shell::{ForeignToplevelInstance, ToplevelId},
-    wayland::aerugo_wm::aerugo_wm_toplevel_v1,
     Aerugo, ClientData, PrivilegedGlobals,
 };
 
@@ -24,6 +23,7 @@ use self::{
 
 use smithay::reexports::wayland_server;
 
+#[allow(non_upper_case_globals)]
 pub mod __interfaces {
     use smithay::reexports::wayland_server::backend as wayland_backend;
     wayland_scanner::generate_interfaces!("../protocols/ext-foreign-toplevel-list-v1.xml");
@@ -103,8 +103,9 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for Aerugo {
         }
     }
 
-    fn destroyed(state: &mut Self, _client: ClientId, resource: ObjectId, _data: &()) {
-        let _ = state.shell.foreign_toplevel_instances.remove(&resource);
+    fn destroyed(state: &mut Self, _client: ClientId, resource: &ExtForeignToplevelListV1, _data: &()) {
+        // TODO
+        //let _ = state.shell.foreign_toplevel_instances.remove(&resource);
     }
 }
 
@@ -124,13 +125,8 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
             ext_foreign_toplevel_handle_v1::Request::Destroy => {
                 // TODO: Check for invalid destruction order in extension protocols.
                 if let Some(toplevel) = state.shell.toplevels.get_mut(id) {
-                    if let Some(handles) = toplevel.get_handles(resource.id()) {
-                        if let Some(ref aerugo_toplevel) = handles.aerugo_toplevel {
-                            aerugo_toplevel.post_error(
-                                aerugo_wm_toplevel_v1::Error::DefunctObject,
-                                "Foreign toplevel handle was destroyed before it's extending aerugo_wm_toplevel_v1 object"
-                            );
-                        }
+                    if let Some(_handles) = toplevel.get_handles(resource.id()) {
+                        // TODO
                     }
                 }
             }
@@ -139,9 +135,10 @@ impl Dispatch<ExtForeignToplevelHandleV1, ToplevelId> for Aerugo {
         }
     }
 
-    fn destroyed(state: &mut Self, _client: ClientId, resource: ObjectId, data: &ToplevelId) {
+    fn destroyed(state: &mut Self, _client: ClientId, resource: &ExtForeignToplevelHandleV1, data: &ToplevelId) {
         if let Some(toplevel) = state.shell.toplevels.get_mut(data) {
-            toplevel.remove_handle(resource);
+            // TODO
+            //toplevel.remove_handle(resource);
         };
     }
 }

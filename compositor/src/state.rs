@@ -22,10 +22,7 @@ use crate::{
     backend::Backend,
     scene::Scene,
     shell::Shell,
-    wayland::{
-        aerugo_wm::aerugo_wm_v1::AerugoWmV1,
-        ext::foreign_toplevel::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1, versions,
-    },
+    wayland::{ext::foreign_toplevel::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1, versions},
     Loop,
 };
 
@@ -51,7 +48,6 @@ impl Aerugo {
         let xdg_shell = XdgShellState::new::<Self>(&display);
         let _foreign_toplevel_list =
             display.create_global::<Self, ExtForeignToplevelListV1, _>(versions::EXT_FOREIGN_TOPLEVEL_LIST_V1, ());
-        let _aerugo_wm = display.create_global::<Self, AerugoWmV1, _>(versions::AERUGO_WM_V1, ());
         let output = Output::new(
             "Test output".into(),
             PhysicalProperties {

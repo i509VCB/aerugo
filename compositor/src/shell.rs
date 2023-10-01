@@ -66,12 +66,11 @@ If the clients fail to commit the previous transaction states, should the WM's n
 client state, and cancel the previous transaction?
 */
 
-use std::{collections::hash_map::Entry, fmt, hash::Hash, num::NonZeroU64, sync::Arc};
+use std::{fmt, num::NonZeroU64, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use smithay::{
     backend::renderer::utils::with_renderer_surface_state,
-    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Serial, Size},
     wayland::{
         compositor::{self, SurfaceAttributes, TraversalAction},
@@ -85,12 +84,9 @@ use smithay::{
 use wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Client, DisplayHandle, Resource};
 
 use crate::{
-    wayland::{
-        aerugo_wm::aerugo_wm_toplevel_v1::AerugoWmToplevelV1,
-        ext::foreign_toplevel::{
-            ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
-            ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
-        },
+    wayland::ext::foreign_toplevel::{
+        ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
+        ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
     },
     Aerugo,
 };
@@ -194,7 +190,6 @@ pub struct Toplevel {
 #[derive(Debug)]
 pub struct ToplevelHandles {
     pub handle: ExtForeignToplevelHandleV1,
-    pub aerugo_toplevel: Option<AerugoWmToplevelV1>,
 }
 
 pub type ToplevelId = NonZeroU64;
@@ -216,13 +211,8 @@ impl Toplevel {
             .unwrap();
         instance.toplevel(&handle);
         handle.identifier(identifier.into());
-        self.handles.insert(
-            handle.id(),
-            ToplevelHandles {
-                handle: handle.clone(),
-                aerugo_toplevel: None,
-            },
-        );
+        self.handles
+            .insert(handle.id(), ToplevelHandles { handle: handle.clone() });
         // Defer sending other information about the toplevel handles.
         handle
     }

@@ -1,13 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-	#"compositor",
-	"examples/*"
+	"compositor",
+	"crates/wm-runtime",
+	"examples/*",
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.71"
+rust-version = "1.72.1"
 # license = 
 version = "0.0.1"
 authors = ["i509VCB <mail@i509.me>"]
@@ -22,62 +23,68 @@ features = [
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
-rev = "a4727cd5cc483821ab7b8a8aa7d17bea013d0282"
+rev = "509030a151ad440f8406229f32d674811efd9007"
 default-features = false
 features = [
 	"backend_egl",
 	"backend_gbm",
 	"backend_vulkan",
 	"backend_x11",
-	"desktop",
 	"renderer_gl",
 	"renderer_glow",
     "wayland_frontend",
 	"xwayland",
 ]
 
-[workspace.dependencies.wayland-client]
-version = "0.30.1"
-
 [workspace.dependencies.wayland-backend]
-version = "0.1.1"
+version = "0.3.2"
 
 [workspace.dependencies.wayland-scanner]
-version = "0.30.0"
+version = "0.31.0"
 
 [workspace.dependencies.wayland-server]
-version = "0.30.0"
+version = "0.31.0"
 
 [workspace.dependencies.calloop]
-# TODO: Smithay upstream needs a newer calloop
-version = "0.10.6"
+version = "0.12.2"
 features = ["executor"]
 
 [workspace.dependencies.nix]
-version = "0.26.2"
+version = "0.27.1"
 
 [workspace.dependencies.rustix]
 version = "0.38.11"
 
-[workspace.dependencies.aerugo-wm]
-path = "wm"
-
 [workspace.dependencies.wit-bindgen]
 git = "https://github.com/bytecodealliance/wit-bindgen"
 
+[workspace.dependencies.wasmtime]
+version = "13.0.0"
+default-features = false
+features = [
+	"cranelift",
+	"cache",
+	"component-model",
+]
+
+# Workspace crates
+[workspace.dependencies.wm-runtime]
+package = "aerugo-wm-runtime"
+path = "crates/wm-runtime"
+
 [workspace.dependencies]
-ashpd = "0.4.0"
-bitflags = "2.3.3"
+ashpd = "0.6.2"
+bitflags = "2.4.0"
 downcast-rs = "1.2.0"
 euclid = "0.22.9"
-once_cell = "1.17.1"
+once_cell = "1.18.0"
 slotmap = "1.0.6"
 rustc-hash = "1.1.0"
 static_assertions = "1.1.0"
-thiserror = "1.0.38"
+thiserror = "1.0.48"
 tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
-zbus = "3.7.0"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+zbus = "3.14.1"
 
 # Enable LTO during release to make the binaries a bit smaller
 [profile.release]

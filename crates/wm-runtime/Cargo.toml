@@ -1,0 +1,12 @@
+[package]
+name = "aerugo-wm-runtime"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+calloop = { workspace = true }
+tracing = { workspace = true }
+wasmtime = { workspace = true }

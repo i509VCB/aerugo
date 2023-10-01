@@ -2,10 +2,10 @@ package aerugo:wm
 
 // TODO: popups, layer shell, pointer, wm surfaces, graphics
 world aerugo-wm {
-    export wm
+    export wm-types
 }
 
-interface wm {
+interface wm-types {
     use types.{key-filter, key-modifiers, key-status, image, output, output-id, server, toplevel, toplevel-id, toplevel-updates}
 
     /// The window manager.
@@ -13,46 +13,46 @@ interface wm {
         /// A new toplevel has been created and is waiting to be mapped.
         ///
         /// At this point the wm may configure the toplevel and prepare the toplevel to be presented..
-        new-toplevel: func(server: borrow<server>, toplevel: own<toplevel>)
+        new-toplevel: func(toplevel: own<toplevel>)
 
         /// The toplevel has been unmapped and therefore closed.
         ///
         /// The display server will cache the contents of the toplevel as long as the toplevel handle is valid
         /// to allow for wms to implement animations when the toplevel is closed.
-        closed-toplevel: func(server: borrow<server>, toplevel: toplevel-id)
+        closed-toplevel: func(toplevel: toplevel-id)
 
         /// The state of the toplevel has changed.
         ///
         /// The provided update flags indicate what properties have changed.
-        update-toplevel: func(server: borrow<server>, toplevel: toplevel-id, updates: toplevel-updates)
+        update-toplevel: func(toplevel: toplevel-id, updates: toplevel-updates)
 
         /// The toplevel has acked a pending state.
         ///
         /// The wm can assume when the toplevel will be committed by the client soon.
-        ack-toplevel: func(server: borrow<server>, toplevel: toplevel-id, serial: u32)
+        ack-toplevel: func(toplevel: toplevel-id, serial: u32)
 
         /// The toplevel has been committed.
         ///
         /// At this point the toplevel can be presented. If the size of the toplevel has changed, a new image
         /// will be provided.
-        committed-toplevel: func(server: borrow<server>, toplevel: toplevel-id, image: option<own<image>>)
+        committed-toplevel: func(toplevel: toplevel-id, image: option<own<image>>)
 
         /// A key has been pressed or released.
         ///
         /// The keycode is an X11 keysym.
-        key: func(server: borrow<server>, time: u32, sym: u32, compose: option<string>, status: key-status) -> key-filter
+        key: func(time: u32, sym: u32, compose: option<string>, status: key-status) -> key-filter
 
         /// The keyboard modifiers have been updated.
-        key-modifiers: func(server: borrow<server>, modifiers: key-modifiers)
+        key-modifiers: func(modifiers: key-modifiers)
 
         /// A new output has been created.
-        new-output: func(server: borrow<server>, output: own<output>)
+        new-output: func(output: own<output>)
 
         /// An output has been disconnected.
-        disconnect-output: func(server: borrow<server>, output: output-id)
+        disconnect-output: func(output: output-id)
     }
 
-    create-wm: func(server: borrow<server>) -> result<own<wm>, string>
+    create-wm: func(server: own<server>) -> result<own<wm>, string>
 }
 
 interface types {
@@ -94,11 +94,11 @@ interface types {
     ///
     /// This object can be used to query the state of a toplevel.
     resource toplevel {
-        /// Query the features supported by the toplevel.
-        features: func() -> features
-
         /// Query the id of the toplevel.
         id: func() -> toplevel-id
+
+        /// Query the features supported by the toplevel.
+        features: func() -> features
 
         /// Query the app id of the toplevel
         ///

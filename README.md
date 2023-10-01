@@ -5,6 +5,10 @@
 Aerugo is my attempt at a Wayland compositor where writing a window manager does not also require writing an
 entire Wayland compositor.
 
+I often see the question "where do I start to write a tiling wm in Wayland?" With Smithay and wlroots the answer is
+pretty much "reinvent the wheel" and implement the entire display server along with the wm. My goal here is to provide an option
+where only focus on the wm needs to happen.
+
 ## Features
 
 To make the window manager easy to write, Aerugo provides a window management API boundary inside a wasm runtime.
@@ -15,6 +19,7 @@ Aerugo's WASM Interface Type (WIT) package.
 
 Some key features *will* include:
 - [ ] Programmable window manager through a wasm runtime
+  - [ ] WM managed surfaces
 - [ ] Runtime reloadable window management
 - [ ] Support for standards such as XDG desktop portals
 - [ ] Support for protocols such as layer shell

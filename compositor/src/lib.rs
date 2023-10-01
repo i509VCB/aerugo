@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     io,
-    os::fd::{AsRawFd, OwnedFd},
+    os::fd::OwnedFd,
     sync::{
         mpsc::{self, SendError},
         Arc,
@@ -156,32 +156,34 @@ enum ExecutorMessage {
 pub struct Loop {
     r#loop: LoopHandle<'static, Self>,
     signal: LoopSignal,
-    display: Display<Aerugo>,
     comp: Aerugo,
+    display: DisplayHandle,
 }
 
 impl Loop {
     pub fn new(r#loop: &EventLoop<'static, Self>, backend: BackendConstructor) -> Result<Self, ()> {
-        let mut display = Display::new().expect("Failed to initialize Wayland display");
-
+        let display = Display::new().expect("Failed to initialize Wayland display");
         let signal = r#loop.get_signal();
         let r#loop = r#loop.handle();
 
+        let display_handle = display.handle();
+
         // Register the display to the event loop to allow client requests to be processed.
-        register_display_source(&mut display, &r#loop);
+        register_display_source(display, &r#loop);
+
+        let display = display_handle;
 
         // Register the listening socket so clients can connect
         register_listening_socket(&r#loop);
 
-        let backend = backend(r#loop.clone(), display.handle()).expect("TODO: Error type");
-
-        let comp = Aerugo::new(&r#loop, display.handle(), backend);
+        let backend = backend(r#loop.clone(), display.clone()).expect("TODO: Error type");
+        let comp = Aerugo::new(&r#loop, display.clone(), backend);
 
         Ok(Self {
             r#loop,
             signal,
-            display,
             comp,
+            display,
         })
     }
 
@@ -205,14 +207,19 @@ impl Loop {
     }
 }
 
-fn register_display_source(display: &mut Display<Aerugo>, r#loop: &LoopHandle<'static, Loop>) {
-    let poll_fd = display.backend().poll_fd().as_raw_fd();
-
+fn register_display_source(display: Display<Aerugo>, r#loop: &LoopHandle<'static, Loop>) {
     r#loop
-        .insert_source(Generic::new(poll_fd, Interest::READ, Mode::Level), |_, _, state| {
-            state.display.dispatch_clients(&mut state.comp).unwrap();
-            Ok(PostAction::Continue)
-        })
+        .insert_source(
+            Generic::new(display, Interest::READ, Mode::Level),
+            |_, display, state| {
+                // SAFETY: we don't drop the display
+                unsafe {
+                    display.get_mut().dispatch_clients(&mut state.comp).unwrap();
+                }
+
+                Ok(PostAction::Continue)
+            },
+        )
         .unwrap();
 }
 
@@ -227,7 +234,7 @@ fn register_listening_socket(r#loop: &LoopHandle<'static, Loop>) {
             let info = format!("{client:?}");
 
             // TODO: Graceful error handling
-            if let Err(err) = state.display.handle().insert_client(
+            if let Err(err) = state.display.insert_client(
                 client,
                 Arc::new(ClientData {
                     // TODO: Limit the available globals

@@ -8,10 +8,8 @@
 pub mod core;
 pub mod ext;
 
-pub mod aerugo_wm;
 pub mod xdg_shell;
 
 pub mod versions {
     pub const EXT_FOREIGN_TOPLEVEL_LIST_V1: u32 = 1;
-    pub const AERUGO_WM_V1: u32 = 1;
 }
