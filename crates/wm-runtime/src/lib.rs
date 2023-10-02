@@ -1,6 +1,7 @@
 //! Wasm WM runtime for the Aerugo.
 
 mod host;
+mod id;
 
 use std::{
     collections::HashMap,
@@ -65,7 +66,7 @@ pub enum WmRequest {
 
 /// A message from the wm runtime.
 #[derive(Debug)]
-pub enum RuntimeEvent {
+pub enum RuntimeMessage {
     Request(WmRequest),
 
     Closed,
@@ -83,7 +84,7 @@ pub struct WmRuntime {
 }
 
 impl EventSource for WmRuntime {
-    type Event = RuntimeEvent;
+    type Event = RuntimeMessage;
     type Metadata = ();
     type Ret = ();
     type Error = Box<(dyn std::error::Error + Send + Sync + 'static)>;
@@ -103,11 +104,11 @@ impl EventSource for WmRuntime {
 
         self.channel.process_events(readiness, token, |event, _| match event {
             channel::Event::Msg(request) => {
-                callback(RuntimeEvent::Request(request), &mut ());
+                callback(RuntimeMessage::Request(request), &mut ());
             }
 
             channel::Event::Closed => {
-                callback(RuntimeEvent::Closed, &mut ());
+                callback(RuntimeMessage::Closed, &mut ());
                 closed = true;
             }
         })?;
@@ -233,6 +234,8 @@ impl Display for IdError {
 
 impl std::error::Error for IdError {}
 
+struct IdAllocator {}
+
 #[derive(Debug)]
 struct WmThread {
     channel: Channel<WmEvent>,
@@ -282,6 +285,10 @@ impl WmState {
             ty: IdType::Node,
         }))
     }
+
+    fn get_toplevel_configure<T: 'static>(&self, _resource: &Resource<T>) -> Result<&mut WmToplevelConfigure, Error> {
+        todo!()
+    }
 }
 
 /// Toplevel wm runtime state.
@@ -298,6 +305,23 @@ struct WmToplevel {
     state: ToplevelState,
     decorations: DecorationMode,
     resize_edge: Option<ResizeEdge>,
+}
+
+#[derive(Debug, Default)]
+enum ConfigureUpdate<T> {
+    #[default]
+    None,
+    Update(Option<T>),
+}
+
+#[derive(Debug)]
+struct WmToplevelConfigure {
+    toplevel_id: Id,
+    decorations: Option<DecorationMode>,
+    parent: ConfigureUpdate<Id>,
+    state: Option<ToplevelState>,
+    size: ConfigureUpdate<Size>,
+    bounds: ConfigureUpdate<Size>,
 }
 
 #[cfg(test)]

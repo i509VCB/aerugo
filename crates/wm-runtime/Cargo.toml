@@ -8,5 +8,6 @@ repository.workspace = true
 
 [dependencies]
 calloop = { workspace = true }
+slotmap = { workspace = true }
 tracing = { workspace = true }
 wasmtime = { workspace = true }

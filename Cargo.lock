@@ -35,6 +35,7 @@ name = "aerugo-wm-runtime"
 version = "0.0.1"
 dependencies = [
  "calloop",
+ "slotmap",
  "tracing",
  "wasmtime",
 ]

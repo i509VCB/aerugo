@@ -2,9 +2,11 @@
 //!
 //! This crate implements the wm runtime used by Aerugo.
 
+use std::num::NonZeroU32;
+
 use wasmtime::component::Resource;
 
-use crate::{WmRequest, WmState};
+use crate::{ConfigureUpdate, Id, IdError, IdType, WmRequest, WmState, WmToplevelConfigure};
 
 use self::aerugo::wm::types::{
     DecorationMode, Features, Focus, Geometry, Host, HostImage, HostNode, HostNodeBuilder, HostOutput, HostServer,
@@ -156,10 +158,21 @@ impl HostToplevel for WmState {
 
 impl HostToplevelConfigure for WmState {
     fn new(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Resource<ToplevelConfigure>> {
-        todo!()
+        let toplevel = self.get_toplevel(&toplevel)?;
+        let configure = WmToplevelConfigure {
+            toplevel_id: toplevel.id,
+            decorations: Default::default(),
+            parent: Default::default(),
+            state: Default::default(),
+            size: Default::default(),
+            bounds: Default::default(),
+        };
+
+        Ok(Resource::new_own(todo!("Allocate owned id for toplevel configure")))
     }
 
     fn submit(&mut self, configure: Resource<ToplevelConfigure>) -> wasmtime::Result<u32> {
+        let _configure = self.get_toplevel_configure(&configure)?;
         todo!()
     }
 
@@ -168,23 +181,52 @@ impl HostToplevelConfigure for WmState {
         configure: Resource<ToplevelConfigure>,
         decorations: DecorationMode,
     ) -> wasmtime::Result<()> {
-        todo!()
+        let configure = self.get_toplevel_configure(&configure)?;
+        configure.decorations = Some(decorations);
+        Ok(())
     }
 
-    fn parent(&mut self, configure: Resource<ToplevelConfigure>, parent: Resource<Toplevel>) -> wasmtime::Result<()> {
-        todo!()
+    fn parent(
+        &mut self,
+        configure: Resource<ToplevelConfigure>,
+        parent: Option<Resource<Toplevel>>,
+    ) -> wasmtime::Result<()> {
+        let configure = self.get_toplevel_configure(&configure)?;
+
+        match parent {
+            Some(parent) => {
+                if parent.owned() {
+                    todo!("propagate error")
+                }
+
+                let parent_id = NonZeroU32::new(parent.rep()).ok_or(IdError::ZeroId)?;
+                configure.parent = ConfigureUpdate::Update(Some(Id(parent_id, IdType::Toplevel)));
+                Ok(())
+            }
+
+            None => {
+                configure.parent = ConfigureUpdate::Update(None);
+                Ok(())
+            }
+        }
     }
 
     fn state(&mut self, configure: Resource<ToplevelConfigure>, states: ToplevelState) -> wasmtime::Result<()> {
-        todo!()
+        let configure = self.get_toplevel_configure(&configure)?;
+        configure.state = Some(states);
+        Ok(())
     }
 
     fn size(&mut self, configure: Resource<ToplevelConfigure>, size: Option<Size>) -> wasmtime::Result<()> {
-        todo!()
+        let configure = self.get_toplevel_configure(&configure)?;
+        configure.size = ConfigureUpdate::Update(size);
+        Ok(())
     }
 
     fn bounds(&mut self, configure: Resource<ToplevelConfigure>, bounds: Option<Size>) -> wasmtime::Result<()> {
-        todo!()
+        let configure = self.get_toplevel_configure(&configure)?;
+        configure.bounds = ConfigureUpdate::Update(bounds);
+        Ok(())
     }
 
     fn drop(&mut self, configure: Resource<ToplevelConfigure>) -> wasmtime::Result<()> {
