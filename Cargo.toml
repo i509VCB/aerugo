@@ -57,9 +57,12 @@ version = "0.38.11"
 
 [workspace.dependencies.wit-bindgen]
 git = "https://github.com/bytecodealliance/wit-bindgen"
+rev = "9c834db09a7f0c78ffacceb94c8186e9cec60dda"
 
 [workspace.dependencies.wasmtime]
-version = "13.0.0"
+# version = "13.0.0"
+git = "https://github.com/bytecodealliance/wasmtime"
+rev = "c642a56cee51d284480099dd57370ee94a2e3f75"
 default-features = false
 features = [
 	"cranelift",

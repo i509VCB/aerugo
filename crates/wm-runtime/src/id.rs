@@ -86,12 +86,49 @@ impl IdAllocator {
 
         // No free ids are available, create a new range
         if self.next_free.is_none() {
+            todo!();
             return Ok(());
         }
 
-        //
+        // Find a contiguous range where the id could go
+        let node =
+            self.visit_node(|range| Some(range.start) == id.checked_add(1) || (range.end.checked_add(1)) == Some(id));
 
-        todo!()
+        match node {
+            Some(node) => {
+                let mut borrow = node.borrow_mut();
+
+                if id < borrow.start && id < borrow.end {
+                    borrow.start = id;
+                } else {
+                    borrow.end = id;
+                }
+            }
+
+            None => {
+                // new range
+                todo!()
+            }
+        }
+
+        Ok(())
+    }
+
+    fn visit_node<F: FnMut(&Range) -> bool>(&self, mut f: F) -> Option<Rc<RefCell<Range>>> {
+        let mut next = self.next_free.as_ref().cloned();
+
+        while let Some(range) = next.take() {
+            let borrow = range.borrow();
+
+            if f(&borrow) {
+                drop(borrow);
+                return Some(range);
+            }
+
+            next = borrow.next.as_ref().and_then(Weak::upgrade);
+        }
+
+        None
     }
 }
 
@@ -106,4 +143,52 @@ struct Range {
     end: NonZeroU32,
     next: Option<Weak<RefCell<Range>>>,
     prev: Option<Weak<RefCell<Range>>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use super::IdAllocator;
+
+    #[test]
+    fn alloc_contig() {
+        let mut alloc = IdAllocator::new(NonZeroU32::MIN, NonZeroU32::MAX);
+
+        let id = alloc.alloc().unwrap();
+        assert_eq!(id.get(), 1);
+
+        let id2 = alloc.alloc().unwrap();
+        assert_eq!(id2.get(), 2);
+
+        alloc.free(id2).unwrap();
+
+        let id2 = alloc.alloc().unwrap();
+        assert_eq!(id2.get(), 2);
+
+        alloc.free(id2).unwrap();
+        alloc.free(id).unwrap();
+
+        let id = alloc.alloc().unwrap();
+        assert_eq!(id.get(), 1);
+    }
+
+    #[test]
+    fn alloc_disjoint() {
+        let mut alloc = IdAllocator::new(NonZeroU32::MIN, NonZeroU32::MAX);
+
+        let id = alloc.alloc().unwrap();
+        assert_eq!(id.get(), 1);
+
+        let id2 = alloc.alloc().unwrap();
+        assert_eq!(id2.get(), 2);
+
+        let id3 = alloc.alloc().unwrap();
+        assert_eq!(id3.get(), 3);
+
+        alloc.free(id2).unwrap();
+
+        let id2 = alloc.alloc().unwrap();
+        assert_eq!(id2.get(), 2);
+    }
 }

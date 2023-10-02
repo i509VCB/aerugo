@@ -2,22 +2,27 @@
 
 mod host;
 mod id;
+mod runner;
 
 use std::{
     collections::HashMap,
     fmt::{self, Display},
     num::NonZeroU32,
-    thread,
 };
 
 use calloop::{
     channel::{Channel, Sender},
     EventSource, Poll, PostAction, TokenFactory,
 };
-use host::aerugo::wm::types::{
-    DecorationMode, Features, Geometry, ResizeEdge, Server, Size, ToplevelId, ToplevelState,
+use host::{
+    aerugo::wm::types::{DecorationMode, Features, Geometry, ResizeEdge, Server, Size, ToplevelState},
+    exports::aerugo::wm::wm_types::WmTypes,
 };
-use wasmtime::{component::Resource, Config, Engine, Store};
+use runner::WmRunner;
+use wasmtime::{
+    component::{Linker, Resource},
+    Config, Engine, Store,
+};
 
 /// An ID which references an object allocated in the WM.
 ///
@@ -38,16 +43,63 @@ impl Id {
 /// The type of an id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IdType {
+    /// The server.
     Server,
+
+    /// A toplevel.
     Toplevel,
+
+    /// An output.
     Output,
-    Image,
-    Node,
+
+    /// A snapshot.
+    ///
+    /// A snapshot is an object which references the contents of a surface for a given size and scale.
+    Snapshot,
+
+    /// A view is a combination of a surface and a snapshot which can be presented.
+    View,
 }
 
 /// An event sent to the wm runtime.
 #[derive(Debug)]
-pub enum WmEvent {}
+pub enum WmEvent {
+    /// Notify the runtime that a new toplevel was created.
+    ///
+    /// This does not actually tell the wm a new toplevel was created until an initial state is sent.
+    NewToplevel {
+        toplevel: Id,
+        features: Features,
+    },
+
+    /// Notify the runtime that a toplevel was closed.
+    ClosedToplevel(Id),
+
+    /// Notify the runtime that a toplevel's state has changed.
+    UpdateToplevel {
+        toplevel: Id,
+        update: ToplevelUpdate,
+    },
+
+    /// Notify the runtime that a configure has been acked.
+    AckToplevel {
+        toplevel: Id,
+        serial: u32,
+    },
+
+    NewOutput {
+        output: Id,
+        // TODO: Info
+    },
+
+    /// TODO: Add to wit file
+    UpdateOutput {
+        output: Id,
+        // TODO: Info
+    },
+
+    DisconnectOutput(Id),
+}
 
 /// A request from the wm runtime.
 #[derive(Debug)]
@@ -70,6 +122,19 @@ pub enum RuntimeMessage {
     Request(WmRequest),
 
     Closed,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToplevelUpdate {
+    pub app_id: Option<String>,
+    pub title: Option<String>,
+    pub min_size: ConfigureUpdate<Size>,
+    pub max_size: ConfigureUpdate<Size>,
+    pub geometry: ConfigureUpdate<Geometry>,
+    pub parent: ConfigureUpdate<Id>,
+    pub state: Option<ToplevelState>,
+    pub decorations: Option<DecorationMode>,
+    pub resize_edge: ConfigureUpdate<ResizeEdge>,
 }
 
 /// The WM runtime.
@@ -136,7 +201,7 @@ impl EventSource for WmRuntime {
 }
 
 impl WmRuntime {
-    pub fn new(_bytes: &[u8]) -> wasmtime::Result<WmRuntime> {
+    pub fn new(bytes: &[u8]) -> wasmtime::Result<WmRuntime> {
         let (event_sender, event_channel) = calloop::channel::channel();
         let (req_sender, req_channel) = calloop::channel::channel();
 
@@ -157,11 +222,35 @@ impl WmRuntime {
             },
         );
 
+        let component = wasmtime::component::Component::new(&engine, bytes)?;
+        let linker = Linker::new(&engine);
+
         // TODO: Tune the fuel amount
         store.add_fuel(10000).unwrap();
 
+        let (aerugo_wm, instance) = host::AerugoWm::instantiate(&mut store, &component, &linker)?;
+        let info = aerugo_wm
+            .aerugo_wm_wm_types()
+            .call_get_info(&mut store)?
+            .expect("Handle string error");
+
+        // TODO: Validate info
+
+        // Allocate the server (id 0).
+        let server = Resource::new_own(0);
+
         // Initialize the wm on this thread.
-        // TODO
+        let wm = aerugo_wm
+            .aerugo_wm_wm_types()
+            .call_create_wm(&mut store, server)?
+            .expect("Handle string error");
+
+        let mut exports = instance.exports(&mut store);
+        let mut export_wm = exports.instance("wm").expect("Handle missing wm export");
+        let funcs = WmTypes::new(&mut export_wm)?;
+
+        // Rust wants us to explicitly drop exports for some reason...
+        drop(exports);
 
         let runtime = WmRuntime {
             channel: req_channel,
@@ -169,27 +258,7 @@ impl WmRuntime {
         };
 
         // Start the wm thread.
-        let _ = thread::Builder::new().name("aerugo wm runtime".into()).spawn(move || {
-            let thread = WmThread {
-                channel: event_channel,
-                store,
-            };
-
-            loop {
-                // Since this is run on a separate thread, we want to manually poll and suspend the thread if no
-                // wm events are pending.
-                match thread.channel.recv() {
-                    Ok(event) => {
-                        // Dispatch the event on the runtime.
-                        // Add some fuel for while dispatching.
-                        let _ = event;
-                    }
-
-                    // The other end was closed.
-                    Err(_) => return,
-                }
-            }
-        })?;
+        WmRunner::new(event_channel, store, wm, funcs).run()?;
 
         Ok(runtime)
     }
@@ -234,14 +303,6 @@ impl Display for IdError {
 
 impl std::error::Error for IdError {}
 
-struct IdAllocator {}
-
-#[derive(Debug)]
-struct WmThread {
-    channel: Channel<WmEvent>,
-    store: Store<WmState>,
-}
-
 #[derive(Debug)]
 struct WmState {
     sender: Sender<WmRequest>,
@@ -250,7 +311,7 @@ struct WmState {
 }
 
 impl WmState {
-    fn validate_id<T: 'static>(&self, resource: &Resource<T>, ty: IdType) -> Result<NonZeroU32, Error> {
+    fn get_id<T: 'static>(&self, resource: &Resource<T>, ty: IdType) -> Result<Id, Error> {
         let rep = NonZeroU32::new(resource.rep()).ok_or(IdError::ZeroId)?;
 
         if self
@@ -263,7 +324,7 @@ impl WmState {
             return Err(Error::Id(IdError::InvalidId { rep: rep.get(), ty }));
         }
 
-        Ok(rep)
+        Ok(Id(rep, IdType::Toplevel))
     }
 
     fn validate_id_server(&self, resource: &Resource<Server>) -> Result<(), Error> {
@@ -278,11 +339,15 @@ impl WmState {
         Ok(())
     }
 
-    fn get_toplevel<T: 'static>(&self, resource: &Resource<T>) -> Result<&WmToplevel, Error> {
-        let rep = self.validate_id(resource, IdType::Toplevel)?;
-        self.toplevels.get(&rep).ok_or(Error::Id(IdError::InvalidId {
-            rep: rep.get(),
-            ty: IdType::Node,
+    fn get_toplevel_res<T: 'static>(&mut self, resource: &Resource<T>) -> Result<&mut WmToplevel, Error> {
+        let id = self.get_id(resource, IdType::Toplevel)?;
+        self.get_toplevel(id)
+    }
+
+    fn get_toplevel(&mut self, id: Id) -> Result<&mut WmToplevel, Error> {
+        self.toplevels.get_mut(&id.rep()).ok_or(Error::Id(IdError::InvalidId {
+            rep: id.rep().get(),
+            ty: IdType::View,
         }))
     }
 
@@ -295,23 +360,30 @@ impl WmState {
 #[derive(Debug)]
 struct WmToplevel {
     id: Id,
+    initial_commit: bool,
     features: Features,
     app_id: Option<String>,
     title: Option<String>,
     min_size: Option<Size>,
     max_size: Option<Size>,
     geometry: Option<Geometry>,
-    parent: Option<ToplevelId>,
+    parent: Option<Id>,
     state: ToplevelState,
     decorations: DecorationMode,
     resize_edge: Option<ResizeEdge>,
 }
 
-#[derive(Debug, Default)]
-enum ConfigureUpdate<T> {
+#[derive(Debug, Clone, Default)]
+pub enum ConfigureUpdate<T> {
     #[default]
     None,
     Update(Option<T>),
+}
+
+impl<T> ConfigureUpdate<T> {
+    pub fn is_update(&self) -> bool {
+        matches!(self, Self::Update(_))
+    }
 }
 
 #[derive(Debug)]

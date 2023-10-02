@@ -1,18 +1,52 @@
+// Copyright 2023 i509VCB
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
 package aerugo:wm
 
 // TODO: popups, layer shell, pointer, wm surfaces, graphics
+
+/// The Aerugo WM API
+///
+/// At a high level the the WM API takes a list of toplevels, popups and layer surfaces, configures each surface
+/// and then describes a tree to present the output.
 world aerugo-wm {
     export wm-types
 }
 
 interface wm-types {
-    use types.{key-filter, key-modifiers, key-status, image, output, output-id, server, toplevel, toplevel-id, toplevel-updates}
+    use types.{key-filter, key-modifiers, key-status, snapshot, output, output-id, server, toplevel, toplevel-id, toplevel-updates}
+
+    /// Description of a wm module.
+    record wm-info {
+        /// Major version of the ABI this wm module was linked to.
+        abi-major: u32,
+
+        /// Minor version of the ABI this wm module was linked to.
+        abi-minor: u32,
+
+        /// Name of this wm module.
+        name: string,
+
+        /// Version of this wm module.
+        version: string,
+    }
 
     /// The window manager.
     resource wm {
         /// A new toplevel has been created and is waiting to be mapped.
         ///
-        /// At this point the wm may configure the toplevel and prepare the toplevel to be presented..
+        /// At this point the wm may configure the toplevel and prepare the toplevel to be presented.
         new-toplevel: func(toplevel: own<toplevel>)
 
         /// The toplevel has been unmapped and therefore closed.
@@ -33,9 +67,9 @@ interface wm-types {
 
         /// The toplevel has been committed.
         ///
-        /// At this point the toplevel can be presented. If the size of the toplevel has changed, a new image
+        /// At this point the toplevel can be presented. If the size of the toplevel has changed, a new snapshot
         /// will be provided.
-        committed-toplevel: func(toplevel: toplevel-id, image: option<own<image>>)
+        committed-toplevel: func(toplevel: toplevel-id, snapshot: option<own<snapshot>>)
 
         /// A key has been pressed or released.
         ///
@@ -52,6 +86,9 @@ interface wm-types {
         disconnect-output: func(output: output-id)
     }
 
+    /// Query information about the wm.
+    get-info: func() -> result<wm-info, string>
+
     create-wm: func(server: own<server>) -> result<own<wm>, string>
 }
 
@@ -65,14 +102,14 @@ interface types {
         set-pointer-focus: func(focus: focus)
     }
 
-    resource node-builder {
-        /// Create a node builder for a toplevel using the specified image. 
-        with-toplevel: static func(toplevel: borrow<toplevel>, image: borrow<image>) -> own<node-builder>
+    resource view-builder {
+        /// Create a node builder for a toplevel using the specified snapshot. 
+        with-toplevel: static func(toplevel: borrow<toplevel>, snapshot: borrow<snapshot>) -> own<view-builder>
 
-        build: func() -> own<node>
+        build: func() -> own<view>
     }
 
-    resource node {}
+    resource view {}
 
     /// A physical or virtual output.
     resource output {
@@ -99,6 +136,11 @@ interface types {
 
         /// Query the features supported by the toplevel.
         features: func() -> features
+
+        /// Query whether the toplevel has been mapped.
+        ///
+        /// If this is true, this toplevel has already been mapped by a past WM due to handoff.
+        mapped: func() -> bool
 
         /// Query the app id of the toplevel
         ///
@@ -172,14 +214,14 @@ interface types {
         bounds: func(bounds: option<size>)
     }
 
-    /// A handle to a committed image.
+    /// A handle to a contents of a surface.
     ///
-    /// When dropped, the backing storage of the image is destroyed.
-    resource image {
-        /// Query the size of the image.
+    /// When dropped, the backing storage of the snapshot is destroyed.
+    resource snapshot {
+        /// Query the size of the snapshot.
         size: func() -> size
 
-        /// Query the scale of the image.
+        /// Query the scale of the snapshot.
         scale: func() -> float32
     }
 

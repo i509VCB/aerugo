@@ -9,9 +9,9 @@ use wasmtime::component::Resource;
 use crate::{ConfigureUpdate, Id, IdError, IdType, WmRequest, WmState, WmToplevelConfigure};
 
 use self::aerugo::wm::types::{
-    DecorationMode, Features, Focus, Geometry, Host, HostImage, HostNode, HostNodeBuilder, HostOutput, HostServer,
-    HostToplevel, HostToplevelConfigure, Image, Node, NodeBuilder, Output, OutputId, ResizeEdge, Server, Size,
-    Toplevel, ToplevelConfigure, ToplevelId, ToplevelState,
+    DecorationMode, Features, Focus, Geometry, Host, HostOutput, HostServer, HostSnapshot, HostToplevel,
+    HostToplevelConfigure, HostView, HostViewBuilder, Output, OutputId, ResizeEdge, Server, Size, Snapshot, Toplevel,
+    ToplevelConfigure, ToplevelId, ToplevelState, View, ViewBuilder,
 };
 
 wasmtime::component::bindgen!(in "../../wm.wit");
@@ -36,26 +36,26 @@ impl HostServer for WmState {
     }
 }
 
-impl HostNodeBuilder for WmState {
+impl HostViewBuilder for WmState {
     fn with_toplevel(
         &mut self,
         toplevel: Resource<Toplevel>,
-        image: Resource<Image>,
-    ) -> wasmtime::Result<Resource<NodeBuilder>> {
+        image: Resource<Snapshot>,
+    ) -> wasmtime::Result<Resource<ViewBuilder>> {
         todo!()
     }
 
-    fn build(&mut self, builder: Resource<NodeBuilder>) -> wasmtime::Result<Resource<Node>> {
+    fn build(&mut self, builder: Resource<ViewBuilder>) -> wasmtime::Result<Resource<View>> {
         todo!()
     }
 
-    fn drop(&mut self, builder: Resource<NodeBuilder>) -> wasmtime::Result<()> {
+    fn drop(&mut self, builder: Resource<ViewBuilder>) -> wasmtime::Result<()> {
         todo!()
     }
 }
 
-impl HostNode for WmState {
-    fn drop(&mut self, node: Resource<Node>) -> wasmtime::Result<()> {
+impl HostView for WmState {
+    fn drop(&mut self, node: Resource<View>) -> wasmtime::Result<()> {
         todo!()
     }
 }
@@ -84,62 +84,62 @@ impl HostOutput for WmState {
 
 impl HostToplevel for WmState {
     fn features(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Features> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.features)
     }
 
     fn id(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<ToplevelId> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.id.rep().get())
     }
 
     fn app_id(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<String>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.app_id.clone())
     }
 
     fn title(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<String>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.title.clone())
     }
 
     fn min_size(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<Size>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.min_size)
     }
 
     fn max_size(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<Size>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.max_size)
     }
 
     fn geometry(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<Geometry>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.geometry)
     }
 
     fn parent(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<ToplevelId>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
-        Ok(toplevel.parent)
+        let toplevel = self.get_toplevel_res(&toplevel)?;
+        Ok(toplevel.parent.map(Id::rep).map(Into::into))
     }
 
     fn state(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<ToplevelState> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.state)
     }
 
     fn decorations(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<DecorationMode> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.decorations)
     }
 
     fn resize_edge(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Option<ResizeEdge>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         Ok(toplevel.resize_edge)
     }
 
     fn request_close(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<()> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         let id = toplevel.id;
 
         let _ = self.sender.send(WmRequest::ToplevelRequestClose(id));
@@ -147,7 +147,7 @@ impl HostToplevel for WmState {
     }
 
     fn drop(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<()> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         let id = toplevel.id;
         // TODO: Remove id from this side.
 
@@ -158,7 +158,7 @@ impl HostToplevel for WmState {
 
 impl HostToplevelConfigure for WmState {
     fn new(&mut self, toplevel: Resource<Toplevel>) -> wasmtime::Result<Resource<ToplevelConfigure>> {
-        let toplevel = self.get_toplevel(&toplevel)?;
+        let toplevel = self.get_toplevel_res(&toplevel)?;
         let configure = WmToplevelConfigure {
             toplevel_id: toplevel.id,
             decorations: Default::default(),
@@ -234,16 +234,16 @@ impl HostToplevelConfigure for WmState {
     }
 }
 
-impl HostImage for WmState {
-    fn size(&mut self, image: Resource<Image>) -> wasmtime::Result<Size> {
+impl HostSnapshot for WmState {
+    fn size(&mut self, snapshot: Resource<Snapshot>) -> wasmtime::Result<Size> {
         todo!()
     }
 
-    fn scale(&mut self, image: Resource<Image>) -> wasmtime::Result<f32> {
+    fn scale(&mut self, snapshot: Resource<Snapshot>) -> wasmtime::Result<f32> {
         todo!()
     }
 
-    fn drop(&mut self, image: Resource<Image>) -> wasmtime::Result<()> {
+    fn drop(&mut self, snapshot: Resource<Snapshot>) -> wasmtime::Result<()> {
         todo!()
     }
 }

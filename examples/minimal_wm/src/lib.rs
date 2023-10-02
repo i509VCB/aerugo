@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use aerugo::wm::types::{
-    Image, KeyFilter, KeyModifiers, KeyStatus, Output, OutputId, Server, Toplevel, ToplevelConfigure, ToplevelId,
+    KeyFilter, KeyModifiers, KeyStatus, Output, OutputId, Server, Snapshot, Toplevel, ToplevelConfigure, ToplevelId,
     ToplevelUpdates,
 };
-use exports::aerugo::wm::wm_types::{Guest, GuestWm};
+use exports::aerugo::wm::wm_types::{Guest, GuestWm, WmInfo};
 use wit_bindgen::{rt::string::String, Resource};
 use xkeysym::KeyCode;
 
@@ -14,7 +14,7 @@ pub struct Wm {
 }
 
 impl Wm {
-    fn new() -> Self {
+    fn new(_server: Server) -> Self {
         todo!()
     }
 
@@ -38,7 +38,7 @@ impl Wm {
         todo!()
     }
 
-    fn committed_toplevel(&mut self, _toplevel: ToplevelId, _image: Option<Image>) {
+    fn committed_toplevel(&mut self, _toplevel: ToplevelId, _snapshot: Option<Snapshot>) {
         todo!()
     }
 
@@ -73,8 +73,17 @@ wit_bindgen::generate!({
 pub struct WmImpl(std::cell::RefCell<Wm>);
 
 impl Guest for WmImpl {
-    fn create_wm(_server: Server) -> Result<Resource<WmImpl>, String> {
-        let wm = Wm::new();
+    fn get_info() -> Result<WmInfo, String> {
+        Ok(WmInfo {
+            abi_major: 0,
+            abi_minor: 1,
+            name: "minimal wm".into(),
+            version: "none".into(),
+        })
+    }
+
+    fn create_wm(server: Server) -> Result<Resource<WmImpl>, String> {
+        let wm = Wm::new(server);
         Ok(Resource::new(Self(std::cell::RefCell::new(wm))))
     }
 }
@@ -96,8 +105,8 @@ impl GuestWm for WmImpl {
         self.0.borrow_mut().ack_toplevel(toplevel, serial);
     }
 
-    fn committed_toplevel(&self, toplevel: ToplevelId, image: Option<Image>) {
-        self.0.borrow_mut().committed_toplevel(toplevel, image)
+    fn committed_toplevel(&self, toplevel: ToplevelId, snapshot: Option<Snapshot>) {
+        self.0.borrow_mut().committed_toplevel(toplevel, snapshot)
     }
 
     fn key(&self, time: u32, sym: u32, compose: Option<String>, status: KeyStatus) -> KeyFilter {

@@ -29,3 +29,9 @@ Eventually I will include a list of protocols somewhere in the repository.
 ## Getting started
 
 Aerugo is still quite WIP: more coming soon!
+
+## Licensing
+
+Aerugo is released under the GNU General Public License v3.0.
+
+The WASM interface type (WIT) definition for the Aerugo WM API is licensed under the MIT license.
