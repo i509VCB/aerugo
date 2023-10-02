@@ -1,5 +1,11 @@
 # Aerugo
 
+# Moved to codeberg
+
+https://codeberg.org/i509vcb/aerugo
+
+----
+
 ## What is Aerugo?
 
 Aerugo is my attempt at a Wayland compositor where writing a window manager does not also require writing an
